@@ -6,4 +6,7 @@ In the scripts folder you fill find an Rmarkdown notebook containing code used t
 
 The script details which chunk of code refers to which figure or supplementary table. 
 
+The Data and Results folder are available upon request. 
+
 Please contact authors for additional details or clarification. 
+
