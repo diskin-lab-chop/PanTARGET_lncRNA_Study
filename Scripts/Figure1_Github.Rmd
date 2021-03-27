@@ -1,0 +1,497 @@
+---
+title: "Figure 1 Generation"
+output: html_notebook
+---
+
+#Gene annotation and expression matrix data: 
+
+```{r}
+
+#loads the gene annotation files used in this study
+
+#genes_anno - all genes considered and their position, gene type, locus etc - Data associated with Supplementary Table 2
+#protein,non_coding - subset of genes_anno based on gene_type
+#all_genes_cancer,exp_cutoff_genes - gene annotation for genes that pass filtering threshold (at least 1 FPKM in 20% of samples)
+
+load("../Data/TARGET/PanCancer_lncRNA_AnnotationFiles_030121.rda")
+
+
+#loads the expression matrix (fpkm) for all samples used in this study 
+
+#fpkm - total expression matrix of all samples and alll genes 
+#fpkm_list - list of dataframes with each cancer gene exp matrix after filtering out low exp genes
+
+load("../Data/TARGET/PanCancer_lncRNA_ExpFiles_030121.rda")
+
+```
+
+
+#Figure 1b and data associated with Supplementary Table 3 - Number of genes expressed per cancer:
+
+```{r}
+
+all_genes_cancer_plot = data.frame(table(all_genes_cancer$X2,all_genes_cancer$type))
+all_genes_cancer_plot$Var1 = factor(all_genes_cancer_plot$Var1,levels=c("AML","BALL","TALL","RT","WT","NBL"))
+all_genes_cancer_plot$Var2 = factor(all_genes_cancer_plot$Var2,levels=c("protein_coding","lncRNA"))
+
+
+x = ggplot(all_genes_cancer_plot,aes(Var1,Freq,fill=Var2,label = Freq))+geom_bar(stat="identity")+xlab("")+ylab("# Expressed Genes\n")
+x = x+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+x =x+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))+geom_text(size = 3, position = position_stack(vjust = 0.5))
+print(x)
+
+#pdf("GeneExp_Per_Cancer.pdf",width=15,height=8)
+#x
+#dev.off()
+
+```
+
+#Figure 1c-d: Cumulative expression of protein and non-coding genes. Cumulattive sum of lncRNA and protein expression across the cancers. The point is to see for any one lncRNA what percentage of total lncRNA expression does that one lncRNA account for? 
+
+```{r}
+
+library(ggplot2)
+library(dplyr)
+
+#gene_list = c(genes_anno[grep("ENSG",genes_anno$V1),1],genes_anno[grep("NR_|NM_",genes_anno$V4),1])
+
+gene_list = genes_anno$V1
+fpkm_sum = fpkm[rownames(fpkm)%in%gene_list,]
+
+#now only include genes that passed expression threshold - can do it this way but just need to state the number of lncRNAs you consider when doing the analysis - 0420 analysis has only robustly expressed genes
+
+fpkm_sum = fpkm_sum[rownames(fpkm_sum)%in%exp_cutoff_genes$V1,]
+
+AML = fpkm_sum[,grep("TARGET.20",colnames(fpkm_sum))]
+ALL = fpkm_sum[,grep("TARGET.10",colnames(fpkm_sum))]
+TALL = ALL[,1:244]
+BALL = ALL[,245:434]
+NBL = fpkm_sum[,grep("TARGET.30",colnames(fpkm_sum))]
+WT = fpkm_sum[,grep("TARGET.50",colnames(fpkm_sum))]
+RT = fpkm_sum[,grep("TARGET.52",colnames(fpkm_sum))]
+
+
+#intergenic lncRNAs? 
+#intergenic = noncoding[grep("lincRNA",noncoding$V3),]
+#intergenic = rbind(intergenic,noncoding[grep("MSTRG|lnc-",noncoding$V3),])
+
+
+#melting data frame per cancer in order to get cumulative sum per lnc/protein
+
+AML_prot = AML[rownames(AML)%in%protein$V1,]
+AML_prot = data.frame(sort(rowSums(AML_prot)/sum(rowSums(AML_prot)),decreasing = T))
+AML_prot$cum_sum = cumsum(AML_prot)
+AML_prot$rank = row_number(AML_prot$cum_sum)
+AML_prot$gene_type = "protein"
+colnames(AML_prot)[1:2] = c("sum","cumsum")
+AML_lnc = AML[rownames(AML)%in%noncoding$V1,]
+AML_lnc = data.frame(sort(rowSums(AML_lnc)/sum(rowSums(AML_lnc)),decreasing = T))
+AML_lnc$cum_sum = cumsum(AML_lnc)
+AML_lnc$rank = row_number(AML_lnc$cum_sum)
+AML_lnc$gene_type = "lncRNA"
+colnames(AML_lnc)[1:2] = c("sum","cumsum")
+AML = data.frame(rbind(AML_prot,AML_lnc))
+AML$Cancer = "AML"
+AML$Genes = rownames(AML)
+rownames(AML) = 1:length(AML[,1])
+
+#ggplot(AML,aes(x=AML$rank,color=AML$gene_type)) + geom_step(aes(y=unlist(AML[,2])),stat="ecdf")
+
+BALL_prot = BALL[rownames(BALL)%in%protein$V1,]
+BALL_prot = data.frame(sort(rowSums(BALL_prot)/sum(rowSums(BALL_prot)),decreasing = T))
+BALL_prot$cum_sum = cumsum(BALL_prot)
+BALL_prot$rank = row_number(BALL_prot$cum_sum)
+BALL_prot$gene_type = "protein"
+colnames(BALL_prot)[1:2] = c("sum","cumsum")
+BALL_lnc = BALL[rownames(BALL)%in%noncoding$V1,]
+BALL_lnc = data.frame(sort(rowSums(BALL_lnc)/sum(rowSums(BALL_lnc)),decreasing = T))
+BALL_lnc$cum_sum = cumsum(BALL_lnc)
+BALL_lnc$rank = row_number(BALL_lnc$cum_sum)
+BALL_lnc$gene_type = "lncRNA"
+colnames(BALL_lnc)[1:2] = c("sum","cumsum")
+BALL = data.frame(rbind(BALL_prot,BALL_lnc))
+BALL$Cancer="BALL"
+BALL$Genes = rownames(BALL)
+rownames(BALL) = 1:length(BALL[,1])
+#ggplot(BALL,aes(x=NBL$rank,color=BALL$gene_type)) + geom_step(aes(y=unlist(BALL[,2])),stat="ecdf")
+
+TALL_prot = TALL[rownames(TALL)%in%protein$V1,]
+TALL_prot = data.frame(sort(rowSums(TALL_prot)/sum(rowSums(TALL_prot)),decreasing = T))
+TALL_prot$cum_sum = cumsum(TALL_prot)
+TALL_prot$rank = row_number(TALL_prot$cum_sum)
+TALL_prot$gene_type = "protein"
+colnames(TALL_prot)[1:2] = c("sum","cumsum")
+TALL_lnc = TALL[rownames(TALL)%in%noncoding$V1,]
+TALL_lnc = data.frame(sort(rowSums(TALL_lnc)/sum(rowSums(TALL_lnc)),decreasing = T))
+TALL_lnc$cum_sum = cumsum(TALL_lnc)
+TALL_lnc$rank = row_number(TALL_lnc$cum_sum)
+TALL_lnc$gene_type = "lncRNA"
+colnames(TALL_lnc)[1:2] = c("sum","cumsum")
+TALL = data.frame(rbind(TALL_prot,TALL_lnc))
+TALL$Cancer = "TALL"
+TALL$Genes = rownames(TALL)
+rownames(TALL) = 1:length(TALL[,1])
+
+#ggplot(TALL,aes(x=TALL$rank,color=TALL$gene_type)) + geom_step(aes(y=unlist(TALL[,2])),stat="ecdf")
+#ggplot(TALL,aes(x=log10(TALL$rank),y=as.numeric(as.character(unlist(TALL[,2]))),color=TALL$gene_type)) + geom_point()
+
+RT_prot = RT[rownames(RT)%in%protein$V1,]
+RT_prot = data.frame(sort(rowSums(RT_prot)/sum(rowSums(RT_prot)),decreasing = T))
+RT_prot$cum_sum = cumsum(RT_prot)
+RT_prot$rank = row_number(RT_prot$cum_sum)
+RT_prot$gene_type = "protein"
+colnames(RT_prot)[1:2] = c("sum","cumsum")
+RT_lnc = RT[rownames(RT)%in%noncoding$V1,]
+RT_lnc = data.frame(sort(rowSums(RT_lnc)/sum(rowSums(RT_lnc)),decreasing = T))
+RT_lnc$cum_sum = cumsum(RT_lnc)
+RT_lnc$rank = row_number(RT_lnc$cum_sum)
+RT_lnc$gene_type = "lncRNA"
+colnames(RT_lnc)[1:2] = c("sum","cumsum")
+RT = data.frame(rbind(RT_prot,RT_lnc))
+RT$Cancer = "RT"
+RT$Genes = rownames(RT)
+rownames(RT) = 1:length(RT[,1])
+
+#ggplot(RT,aes(x=RT$rank,color=RT$gene_type)) + geom_step(aes(y=unlist(RT[,2])),stat="ecdf")
+#ggplot(RT,aes(x=log10(RT$rank),y=unlist(RT[,2]),color=RT$gene_type)) + geom_point()
+
+WT_prot = WT[rownames(WT)%in%protein$V1,]
+WT_prot = data.frame(sort(rowSums(WT_prot)/sum(rowSums(WT_prot)),decreasing = T))
+WT_prot$cum_sum = cumsum(WT_prot)
+WT_prot$rank = row_number(WT_prot$cum_sum)
+WT_prot$gene_type = "protein"
+colnames(WT_prot)[1:2] = c("sum","cumsum")
+WT_lnc = WT[rownames(WT)%in%noncoding$V1,]
+WT_lnc = data.frame(sort(rowSums(WT_lnc)/sum(rowSums(WT_lnc)),decreasing = T))
+WT_lnc$cum_sum = cumsum(WT_lnc)
+WT_lnc$rank = row_number(WT_lnc$cum_sum)
+WT_lnc$gene_type = "lncRNA"
+colnames(WT_lnc)[1:2] = c("sum","cumsum")
+WT = data.frame(rbind(WT_prot,WT_lnc))
+WT$Cancer = "WT"
+WT$Genes = rownames(WT)
+rownames(WT) = 1:length(WT[,1])
+
+#ggplot(WT,aes(x=WT$rank,color=WT$gene_type)) + geom_step(aes(y=unlist(WT[,2])),stat="ecdf")
+#ggplot(WT,aes(x=log10(WT$rank),y=unlist(WT[,2]),color=WT$gene_type)) + geom_point()
+
+NBL_prot = NBL[rownames(NBL)%in%protein$V1,]
+NBL_prot = data.frame(sort(rowSums(NBL_prot)/sum(rowSums(NBL_prot)),decreasing = T))
+NBL_prot$cum_sum = cumsum(NBL_prot)
+NBL_prot$rank = row_number(NBL_prot$cum_sum)
+NBL_prot$gene_type = "protein"
+colnames(NBL_prot)[1:2] = c("sum","cumsum")
+NBL_lnc = NBL[rownames(NBL)%in%noncoding$V1,]
+NBL_lnc = data.frame(sort(rowSums(NBL_lnc)/sum(rowSums(NBL_lnc)),decreasing = T))
+NBL_lnc$cum_sum = cumsum(NBL_lnc)
+NBL_lnc$rank = row_number(NBL_lnc$cum_sum)
+NBL_lnc$gene_type = "lncRNA"
+colnames(NBL_lnc)[1:2] = c("sum","cumsum")
+NBL = data.frame(rbind(NBL_prot,NBL_lnc))
+NBL$Cancer = "NBL"
+NBL$Genes = rownames(NBL)
+rownames(NBL) = 1:length(NBL[,1])
+
+#ggplot(NBL,aes(x=NBL$rank,color=NBL$gene_type)) + geom_step(aes(y=unlist(NBL[,2])),stat="ecdf")
+#ggplot(NBL,aes(x=log10(NBL$rank),y=unlist(NBL[,2]),color=NBL$gene_type)) + geom_point()
+
+
+#after getting cumulative sum per cancer, plot the resutlts 
+
+all_cancer = data.frame(rbind(as.matrix(AML),as.matrix(BALL)))
+all_cancer = rbind(all_cancer,as.matrix(TALL))
+all_cancer = rbind(all_cancer,as.matrix(RT))
+all_cancer = rbind(all_cancer,as.matrix(WT))
+all_cancer = rbind(all_cancer,as.matrix(NBL))
+
+all_cancer_lnc = all_cancer[all_cancer$gene_type=="lncRNA",]
+#all_cancer_lnc[,2] = round(as.numeric(as.character(unlist(all_cancer_lnc[,2]))),3)
+
+x = ggplot(all_cancer_lnc,aes(x=as.numeric(as.character(all_cancer_lnc$rank)),y=as.numeric(as.character(unlist(all_cancer_lnc[,2]))),color=Cancer,fill=Cancer)) + geom_point() +xlab("\n# of lncRNA genes") + ylab("% of total lncRNA gene expression \n")+scale_x_log10()
+#changes background panel
+x = x+theme_classic()+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+#change fonts and colors of the axes
+x =x+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))
+x
+
+print(x)
+
+png("../Results/PanTarget_CumSum_lncRNA_ExpCutOFF_0720.png")
+plot(x)
+dev.off()
+
+pdf("../Results/PanTarget_CumSum_lncRNA_ExpCutOFF_0720_R.pdf")
+plot(x)
+dev.off()
+
+#Protein version -  variable content updated to protein
+
+all_cancer_lnc = all_cancer[all_cancer$gene_type=="protein",]
+#all_cancer_lnc[,2] = round(as.numeric(as.character(unlist(all_cancer_lnc[,2]))),3)
+
+x = ggplot(all_cancer_lnc,aes(x=as.numeric(as.character(all_cancer_lnc$rank)),y=as.numeric(as.character(unlist(all_cancer_lnc[,2]))),color=Cancer)) + geom_point() +xlab("\n# of protein coding genes (PCG)") + ylab("% of total PCG expression\n")+scale_x_log10()
+
+#changes background panel
+x = x+theme_classic()+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+#change fonts and colors of the axes
+x =x+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))
+
+print(x)
+
+png("../Results/PanTarget_CumSum_Protein_ExpCutOFF_0720.png")
+plot(x)
+dev.off()
+
+pdf("../Results/PanTarget_CumSum_Protein_ExpCutOFF_0720.pdf")
+plot(x)
+dev.off()
+
+```
+
+#Plot the top 5 lncRNAs with the most expression across all the cancers - requires the all_cancer_lnc variable from previous code chunk, run previous chunk. Need to run this in order to generate final Figure 1e - Data associated with Supplementary Table 4 - TARGET
+
+```{r}
+
+#Filter for lncRNAs
+all_cancer_lnc = all_cancer[all_cancer$gene_type=="lncRNA",]
+
+#Rank each lncRNA based on sorted % of total lncRNA expression. 
+all_cancer_lnc$plot_rank = all_cancer_lnc$rank
+all_cancer_lnc$gene_name = all_cancer_lnc$Genes
+all_cancer_lnc$gene_name = genes_anno[as.character(all_cancer_lnc$gene_name),4]
+
+all_cancer_lnc_top10= all_cancer_lnc[as.numeric(all_cancer_lnc$rank)<=10,]
+all_cancer_lnc_top10 = dcast(all_cancer_lnc_top10,Cancer~rank,value.var="gene_name")
+
+write.table(all_cancer_lnc_top10,"Top10_lncRNA_PanTarget.txt",quote=F,row.names = F,sep="\t")
+
+all_cancer_lnc$plot_rank = as.numeric(as.character(all_cancer_lnc$plot_rank))
+
+#Keep on the first five, then sum the rest of the lncRNAs to get the rest of the % i.e. Number 6 rank = all other lncRNAs
+all_cancer_lnc = all_cancer_lnc[all_cancer_lnc$plot_rank<=6,]
+
+all_cancer_lnc[,1] = as.numeric(as.character(all_cancer_lnc[,1]))
+all_cancer_lnc[,2] = as.numeric(as.character(all_cancer_lnc[,2]))
+
+all_cancer_lnc[as.numeric(all_cancer_lnc$rank)==6,1]=1-all_cancer_lnc[as.numeric(all_cancer_lnc$rank)==5,2]
+
+all_cancer_lnc[all_cancer_lnc$plot_rank<=5,]$plot_rank = as.character(all_cancer_lnc[all_cancer_lnc$plot_rank<=5,]$gene_name)
+
+all_cancer_lnc$plot_rank = as.character(all_cancer_lnc$plot_rank)
+all_cancer_lnc[all_cancer_lnc$plot_rank==6,]$plot_rank = "all_other_lncRNAs"
+
+level_names = names(sort(table(as.character(all_cancer_lnc$plot_rank))))
+level_names = level_names[level_names!="all_other_lncRNAs"]
+level_names = c("all_other_lncRNAs",level_names)
+
+all_cancer_lnc$plot_rank = factor(all_cancer_lnc$plot_rank,levels=c(level_names))
+
+y = ggplot(all_cancer_lnc,aes(x=all_cancer_lnc$Cancer,all_cancer_lnc[,1],fill=plot_rank))+geom_col(colour="black")
+
+y= y+xlab("\n") + ylab("% of total lncRNA expression\n")
+
+y = y+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black")) 
+
+#change fonts and colors of the axes
+library(RColorBrewer)
+
+colourCount = 12
+
+getPalette = colorRampPalette(brewer.pal(9, "Spectral"))
+y =y+theme(text = element_text(size=25,color="black"),axis.text = element_text(size=25,color="black"))+scale_fill_manual(values =getPalette(colourCount),name = "lncRNAs")
+
+palette=c("white","Spectral")
+
+#+scale_y_continuous(expand = c(0,0))
+#y
+
+print(y)
+
+png("../Results/PanTarget_Top5_Expressed_lncRNAs_ExpCutOFF_0720.png",height=920,width=970)
+plot(y)
+dev.off()
+
+```
+
+#Figure 1e: Plot the top 5 lncRNAs with the most expression across all the cancers - requires the all_cancer_lnc variable from previous code chunk, run previous chunk. In this chunk however we made slight modification - instead we plot the UNION of the top 5 lncRNAs per cancer. This chunk requires that you run the two previous chunks. 
+
+```{r}
+
+top5_lncs = level_names[-1]
+
+all_cancer_lnc = all_cancer[all_cancer$gene_type=="lncRNA",]
+all_cancer_lnc$plot_rank = all_cancer_lnc$rank
+all_cancer_lnc$gene_name = all_cancer_lnc$Genes
+all_cancer_lnc$gene_name = genes_anno[as.character(all_cancer_lnc$gene_name),4]
+
+all_cancer_lnc$plot_rank = as.numeric(as.character(all_cancer_lnc$plot_rank))
+
+all_cancer_lnc = all_cancer_lnc[all_cancer_lnc$gene_name%in%top5_lncs,]
+
+all_cancer_lnc[,1] = as.numeric(as.character(all_cancer_lnc[,1]))
+all_cancer_lnc[,2] = as.numeric(as.character(all_cancer_lnc[,2]))
+
+#add another row per cancer for all other genes - cumulative sum 
+
+new_row = c(1-sum(as.numeric(as.character(all_cancer_lnc[all_cancer_lnc$Cancer=="AML",1]))),NA,NA,"lncRNA","AML",NA,5000,"all_other_lncRNAs")
+all_cancer_lnc = rbind(all_cancer_lnc,new_row)
+
+new_row = c(1-sum(as.numeric(as.character(all_cancer_lnc[all_cancer_lnc$Cancer=="BALL",1]))),NA,NA,"lncRNA","BALL",NA,5000,"all_other_lncRNAs")
+all_cancer_lnc = rbind(all_cancer_lnc,new_row)
+
+new_row = c(1-sum(as.numeric(as.character(all_cancer_lnc[all_cancer_lnc$Cancer=="TALL",1]))),NA,NA,"lncRNA","TALL",NA,5000,"all_other_lncRNAs")
+all_cancer_lnc = rbind(all_cancer_lnc,new_row)
+
+new_row = c(1-sum(as.numeric(as.character(all_cancer_lnc[all_cancer_lnc$Cancer=="WT",1]))),NA,NA,"lncRNA","WT",NA,5000,"all_other_lncRNAs")
+all_cancer_lnc = rbind(all_cancer_lnc,new_row)
+
+new_row = c(1-sum(as.numeric(as.character(all_cancer_lnc[all_cancer_lnc$Cancer=="RT",1]))),NA,NA,"lncRNA","RT",NA,5000,"all_other_lncRNAs")
+all_cancer_lnc = rbind(all_cancer_lnc,new_row)
+
+new_row = c(1-sum(as.numeric(as.character(all_cancer_lnc[all_cancer_lnc$Cancer=="NBL",1]))),NA,NA,"lncRNA","NBL",NA,5000,"all_other_lncRNAs")
+all_cancer_lnc = rbind(all_cancer_lnc,new_row)
+
+all_cancer_lnc$plot_rank = as.numeric(all_cancer_lnc$plot_rank)
+all_cancer_lnc = all_cancer_lnc[order(all_cancer_lnc$plot_rank),]
+all_cancer_lnc = all_cancer_lnc[order(all_cancer_lnc$Cancer),]
+
+all_cancer_lnc$plot_rank = all_cancer_lnc$gene_name
+
+all_cancer_lnc[,1] = as.numeric(as.character(all_cancer_lnc[,1]))
+all_cancer_lnc[,2] = as.numeric(as.character(all_cancer_lnc[,2]))
+
+#alternatively make the factors the actual rank order of the genes 
+
+level_names = rev(names(table(as.character(all_cancer_lnc$plot_rank))))
+level_names = level_names[level_names!="all_other_lncRNAs"]
+level_names = c("all_other_lncRNAs",level_names)
+
+
+all_cancer_lnc$plot_rank = factor(all_cancer_lnc$plot_rank,levels=c(level_names))
+
+y = ggplot(all_cancer_lnc,aes(x=all_cancer_lnc$Cancer,all_cancer_lnc[,1],fill=plot_rank))+geom_col(colour="black")
+
+y= y+xlab("\n") + ylab("% of total lncRNA expression\n")
+
+y = y+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"),legend.position = "bottom",legend.title = element_blank())
+
+#change fonts and colors of the axes
+
+y =y+theme(text = element_text(size=25,color="black"),axis.text = element_text(size=25,color="black"))+scale_fill_manual(values =c("#d4d2d2",getPalette(colourCount)[-1]),name = "lncRNAs")
+
+getPalette(colourCount)
+
+y
+
+print(y)
+
+
+png("../Results/PanTarget_Top5_Expressed_lncRNAs_AllShown_0720.png",height=1000,width=970)
+plot(y)
+dev.off()
+
+pdf("../Results/PanTarget_Top5_Expressed_lncRNAs_AllShown_0720.pdf",height=12,width=11)
+plot(y)
+dev.off()
+
+```
+
+
+#Supplementary Table 4 - GTEX top 10 lncRNAs expressed per tissue 
+
+```{r}
+
+#top lncRNAs expressed in GTEX tissues - proper way with tpm 
+library(data.table)
+library(dplyr)
+library(reshape2)
+
+gtex = fread("../Data/GTEX/GTEx_Analysis_2017-06-05_v8_RNASeQCv1.1.9_gene_tpm.gct")
+#gtex_lnc = gtex[gtex$Name%in%genes_anno[grep("lncRNA",genes_anno$V3),1],]
+#gtex_lnc2 = gtex[gtex$Description%in%genes_anno[grep("lncRNA",genes_anno$V3),4],]
+
+temp = gtex$Name
+
+temp = gsub("\\...","",temp)
+temp = gsub("\\..","",temp)
+temp = data.frame(temp)
+temp$long = gtex$Name
+
+#requires genes_anno data frame 
+
+noncoding = genes_anno[grep("lncRNA",genes_anno$V3),]
+noncoding$short_genc = noncoding$V1
+noncoding$short_genc = gsub("\\...","",noncoding$short_genc)
+noncoding$short_genc = gsub("\\..","",noncoding$short_genc)
+
+temp = temp[temp$temp%in%noncoding$short_genc,]
+gtex_lnc = gtex[gtex$Name%in%temp$long,]
+rm(gtex)
+
+rownames(temp) = temp$long
+
+#save(gtex_lnc,"Gtex_lncRNAs")
+
+gtex_lnc = data.frame(gtex_lnc)
+rownames(gtex_lnc) = gtex_lnc$Name
+gtex_lnc$Name = NULL
+temp$name = gtex_lnc[(as.character(temp$long)),]$Description
+gtex_lnc$Description = NULL
+
+
+gtex_metaData = read.delim("../Data/GTEX/gtex_data/GTEx_Analysis_v8_Annotations_SampleAttributesDS.txt")
+gtex_metaData$SAMPID = gsub("-","\\.",gtex_metaData$SAMPID)
+gtex_metaData = gtex_metaData[gtex_metaData$SAMPID%in%colnames(gtex_lnc),]
+
+#consider tissues with at least 50 samples 
+
+hist(table(gtex_metaData$SMTSD))
+tis_num = table(gtex_metaData$SMTSD)
+tis_num = tis_num[tis_num>=50]
+gtex_metaData  = gtex_metaData[gtex_metaData$SMTSD%in%names(tis_num),]
+
+gtex_lnc = gtex_lnc[,colnames(gtex_lnc)%in%gtex_metaData$SAMPID]
+
+#put into a loop to do all cancers and report the top 100 per cancer 
+
+all_tissue_rank = c()
+
+for (tis_name in names(tis_num)){
+  tissue = gtex_lnc[,colnames(gtex_lnc)%in%gtex_metaData[gtex_metaData$SMTSD==tis_name,1]]
+  tissue = data.frame(sort(rowSums(tissue)/sum(rowSums(tissue)),decreasing = T))
+  tissue$cum_sum = cumsum(tissue)
+  tissue$rank = row_number(tissue$cum_sum)
+  tissue$gene_type = "lncRNA"
+  colnames(tissue)[1:2] = c("sum","cumsum")
+  tissue$gene_name = temp[rownames(tissue),3]
+  tissue$tissue = tis_name
+  all_tissue_rank = rbind(all_tissue_rank,tissue[,c("rank","gene_name","tissue","sum")])
+}
+
+all_tissue_rank_top10 = all_tissue_rank[all_tissue_rank$rank<=10,]
+all_tissue_rank_top10$sum = NULL
+all_tissue_rank_top10_2 = dcast(all_tissue_rank_top10,tissue~rank,value.var="gene_name")
+
+
+#Output - Table:
+
+#write.table(all_tissue_rank_top10_2,"Top10Genes_GTEX_SuppTable4.txt",quote = F,row.names=F,sep="\t")
+
+```
+
+
+
+
+
+
+
+
+
+
+

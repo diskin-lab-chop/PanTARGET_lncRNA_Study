@@ -1,0 +1,491 @@
+---
+title: "Figure 3 and Supplementary Figure 4 - SV analysis"
+output: html_notebook
+---
+
+#Gene annotation and expression matrix data: 
+
+```{r}
+
+#loads the gene annotation files used in this study
+
+#genes_anno - all genes considered and their position, gene type, locus etc - Data associated with Supplementary Table 2
+#protein,non_coding - subset of genes_anno based on gene_type
+#all_genes_cancer,exp_cutoff_genes - gene annotation for genes that pass filtering threshold (at least 1 FPKM in 20% of samples)
+
+load("../Data/TARGET/PanCancer_lncRNA_AnnotationFiles_030121.rda")
+
+
+#loads the expression matrix (fpkm) for all samples used in this study 
+
+#fpkm - total expression matrix of all samples and alll genes 
+#fpkm_list - list of dataframes with each cancer gene exp matrix after filtering out low exp genes
+
+load("../Data/TARGET/PanCancer_lncRNA_ExpFiles_030121.rda")
+
+```
+
+Preprocessing of the data. Gonzalo has filtered SV data called by CGI as described in this paper: Somatic structural variation targets neurodevelopmental genes and identifies SHANK2 as a tumor suppressor in neuroblastoma. 
+
+Large file: StructVariants_CGIalign_lncrnas_apr1_2019.rda, bed version: Structure_Var_CGI_PanTarget_0420_GonzaloMethod.bed.
+
+Bedfile for gene loci - SV could be in intron or exon: PanTarget_GeneAnnotation_040102_GonzaloSV.bed
+
+PanTarget_AllTranscript_Exons_Final_032020_Filtered.bed
+
+SV type: Copy number break point bed file: PanTarget_CopyNumberBreakPoints_040120.bed
+
+Gonzalo method refers to look for SV in the gene itself or 2000bp up or downstream of the gene. 
+
+SV gene overlap: bedtools intersect -a Structure_Var_CGI_PanTarget_0420_GonzaloMethod.bed -b PanTarget_GeneAnnotation_040102_GonzaloSV.bed -wo | cut -f4,10 > PanTarget_Structural_Variant_GeneLevel_0420_GonzaloMethod.bed
+
+#The following organizes the results of the SV Gene overlap from above and outputs a data frame that is then used to generate figures. Also creates data frame for Supplementary Table 9 and function for Supplementary Figure 4d-f or plotting expression of any SV impacted gene that has available RNA samples. 
+
+```{r}
+
+pantarsv = read.table("../Data/TARGET/CNV_SV_Data/SV/PanTarget_Structural_Variant_GeneLevel_0420_GonzaloMethod.bed")
+pantarsv =pantarsv[!duplicated(pantarsv),]
+pantarsv$V2 = as.character(pantarsv$V2)
+
+#convert lncipedia names
+
+lncipedia = pantarsv[grep("lnc-",pantarsv$V2),]
+temp = lncipedia$V2
+temp = gsub("lnc-","",temp)
+temp = gsub('.{2}$', '', temp)
+temp[str_sub(temp,-1)=="-"] = str_sub(temp[str_sub(temp,-1)=="-"],1,-2)
+temp = paste("lnc",temp,sep="-")
+pantarsv[grep("lnc-",pantarsv$V2),]$V2 = temp
+
+#get the correct sample set
+pantarsv$short = as.character(str_sub(pantarsv$V1,1,24))
+pantarsv$cancer = "none"
+pantarsv[grep("TARGET.30",pantarsv$short),]$cancer = "NBL"
+pantarsv[grep("TARGET.20",pantarsv$short),]$cancer = "AML"
+pantarsv[grep("TARGET.50",pantarsv$short),]$cancer = "WT"
+pantarsv[grep("TARGET.10",pantarsv$short),]$cancer = "BALL"
+#remove OS/CCSK samples
+pantarsv = pantarsv[grep("TARGET.40",pantarsv$short,invert=T),]
+pantarsv = pantarsv[grep("TARGET.51",pantarsv$short,invert=T),]
+
+#split SV into individual data frames 
+
+amlsv = pantarsv[pantarsv$cancer=="AML",]
+amlsv = amlsv[amlsv$V2%in%rownames(AML),]
+
+ballsv = pantarsv[pantarsv$cancer=="BALL",]
+ballsv = ballsv[ballsv$V2%in%rownames(BALL),]
+
+wtsv = pantarsv[pantarsv$cancer=="WT",]
+wtsv = wtsv[wtsv$V2%in%rownames(WT),]
+
+nblsv = pantarsv[pantarsv$cancer=="NBL",]
+nblsv = nblsv[nblsv$V2%in%rownames(NBL),]
+
+pantarsv = rbind(amlsv,ballsv,nblsv,wtsv)
+
+#VERY IMPORTANT TO GET THE HIGH CONF LNCS
+pantarsv = pantarsv[pantarsv$V2%in%exp_cutoff_genes$V1,] #12339,23226
+
+#number of mutations at lncRNA break points
+length(pantarsv[pantarsv$V2%in%rownames(noncoding),1]) #X mutations, 1835
+
+#number of samples with break points at lncRNAs 
+length(table(as.character(pantarsv[pantarsv$V2%in%rownames(noncoding),]$short))) #X samples, 349
+
+#LOAD the CN-BP data to integrate 
+pantarcnbp_gene = read.table("../Data/TARGET/CNV_SV_Data/SV/PanTarget_CNV_BP_GeneLevel_0420_GonzaloMethod.bed")
+pantarcnbp_gene$V2 = as.character(pantarcnbp_gene$V2)
+lncipedia = pantarcnbp_gene[grep("lnc-",pantarcnbp_gene$V2),]
+temp = lncipedia$V2
+temp = gsub("lnc-","",temp)
+temp = gsub('.{2}$', '', temp)
+temp[str_sub(temp,-1)=="-"] = str_sub(temp[str_sub(temp,-1)=="-"],1,-2)
+temp = paste("lnc",temp,sep="-")
+pantarcnbp_gene[grep("lnc-",pantarcnbp_gene$V2),]$V2 = temp
+
+pantarcnbp_gene = pantarcnbp_gene[pantarcnbp_gene$V2%in%exp_cutoff_genes$V1,]
+#pantarcnbp_gene = pantarcnbp_gene[pantarcnbp_gene$V1%in%pantarsv$short,]
+
+#annotate gene_sample pairs available in the SV-BP data 
+pantarcnbp_gene$combo = paste(pantarcnbp_gene$V1,pantarcnbp_gene$V2,sep="_")
+pantarsv$combo = paste(pantarsv$short,pantarsv$V2,sep="_")
+pantarcnbp_gene$SV_avail = "no"
+pantarcnbp_gene[pantarcnbp_gene$combo%in%pantarsv$combo,]$SV_avail = "yes"
+pantarcnbp_gene$cancer = "none"
+pantarcnbp_gene[grep("TARGET.10",pantarcnbp_gene$V1),]$cancer = "BALL"
+pantarcnbp_gene[grep("TARGET.30",pantarcnbp_gene$V1),]$cancer = "NBL"
+pantarcnbp_gene[grep("TARGET.20",pantarcnbp_gene$V1),]$cancer = "AML"
+pantarcnbp_gene[grep("TARGET.50",pantarcnbp_gene$V1),]$cancer = "WT"
+pantarcnbp_gene = pantarcnbp_gene[pantarcnbp_gene$cancer!="none",]
+colnames(pantarcnbp_gene)[1] = "short"
+
+pantarsv$analysis_type = "SJ-BP"
+pantarcnbp_gene$analysis_type = "RD-BP"
+
+pantarsv_nondp = rbind(pantarsv[,c(2:4,6)],pantarcnbp_gene[,c(2,1,5,6)])
+
+pantarsv_nondp = pantarsv_nondp[!duplicated(pantarsv_nondp),]
+
+#get numbers per analysis type 
+
+pantarsv_nondp$gene_sample = paste(pantarsv_nondp$V2,pantarsv_nondp$short,sep="_")
+
+length(table(as.character(pantarsv_nondp$gene_sample))) #20593 unique-gene sample/22463
+
+temp = pantarsv_nondp[duplicated(pantarsv_nondp$gene_sample),]$gene_sample
+
+#duplicates from SJ/RD analyses already removed - duplicates here are othogonal 
+temp = pantarsv_nondp[pantarsv_nondp$gene_sample%in%temp,] #1870 - gene-sample pairs
+
+pantarsv_nondp[pantarsv_nondp$gene_sample%in%temp$gene_sample,]$analysis_type = "both"
+#boxplot of number of samples that impact lncRNA or protein coding gene
+
+pantarsv_nondp$gene_type = "none"
+pantarsv_nondp[pantarsv_nondp$V2%in%protein$V1,]$gene_type = "protein"
+pantarsv_nondp[pantarsv_nondp$V2%in%noncoding$V1,]$gene_type = "lncRNA"
+
+#focused on only protein coding and lncRNA genes 
+pantarsv_nondp = pantarsv_nondp[pantarsv_nondp$gene_type!="none",]
+
+pantarsv_nondp$cancer = "none"
+pantarsv_nondp[grep("TARGET.30",pantarsv_nondp$short),]$cancer = "NBL"
+pantarsv_nondp[grep("TARGET.10",pantarsv_nondp$short),]$cancer = "BALL"
+pantarsv_nondp[grep("TARGET.20",pantarsv_nondp$short),]$cancer = "AML"
+pantarsv_nondp[grep("TARGET.50",pantarsv_nondp$short),]$cancer = "WT"
+
+pantarsv_nondp = data.frame(table(pantarsv_nondp$cancer,pantarsv_nondp$analysis_type,pantarsv_nondp$gene_type))
+pantarsv_nondp = pantarsv_nondp[pantarsv_nondp$Freq!=0,]
+
+pantarsv_nondp$Var1 = factor(pantarsv_nondp$Var1,levels=c("AML","WT","NBL","BALL"))
+pantarsv_nondp$sum= 0
+
+pantarsv_nondp = rbind(pantarsv[,c(2:4)],pantarcnbp_gene[,c(2,1,5)])
+
+pantarsv_nondp = pantarsv_nondp[!duplicated(pantarsv_nondp),]
+
+pantarsv_nondp$rna_name = gsub("-0.D","",pantarsv_nondp$short)
+
+RNA_samples = colnames(fpkm)
+RNA_samples = gsub("\\.","-",RNA_samples)
+RNA_samples = gsub("-0.R_.","",RNA_samples)
+RNA_samples = gsub("-0.R","",RNA_samples)
+RNA_samples = gsub("01AB","01A",RNA_samples)
+
+pantarsv_nondp$rna_matched = "no"
+
+pantarsv_nondp[pantarsv_nondp$rna_name%in%RNA_samples,]$rna_matched = "yes"
+
+RNA_samples = data.frame(RNA_samples)
+RNA_samples$rna_name =colnames(fpkm)
+rownames(RNA_samples) = RNA_samples[,1]
+
+
+#annotation of the SVs based on gene and summation of samples 
+pantarsv_annotation = data.frame(table(pantarsv_nondp$V2,pantarsv_nondp$cancer,pantarsv_nondp$rna_matched))
+pantarsv_annotation = pantarsv_annotation[pantarsv_annotation$Freq!=0,]
+pantarsv_annotation$gene_name = genes_anno[as.character(pantarsv_annotation$Var1),4]
+pantarsv_annotation$gene_type = genes_anno[as.character(pantarsv_annotation$Var1),3]
+pantarsv_annotation$chr = genes_anno[as.character(pantarsv_annotation$Var1),5]
+
+#write.table(pantarsv_annotation,"../Results/Final_PanTarget_SV_Annotation.txt",quote=F,row.names=F,col.names=F,sep="\t")
+
+pantarsv_annotation$combo = paste(pantarsv_annotation$Var1,pantarsv_annotation$Var2,sep="_")
+
+pantarsv_annotation_rna = pantarsv_annotation[pantarsv_annotation$Var3=="yes",]
+
+pantarsv_annotation_lncrna = pantarsv_annotation[pantarsv_annotation$Var1%in%rownames(noncoding_high),] 
+
+#Supplementary Table 9
+#write.table(pantarsv_annotation_lncrna,"SV_lncRNA_Summary_Table_0920.txt",quote=F,row.names=F,sep="\t")
+
+all_genes_cancer$combo = paste(all_genes_cancer$X1,all_genes_cancer$X2,sep="_")
+pantarsv_annotation_lncrna = pantarsv_annotation_lncrna[pantarsv_annotation_lncrna$combo%in%all_genes_cancer$combo,]
+#write.table(sv_table2,"SV_lncRNA_Summary_Table_Exp_0920.txt",quote=F,row.names=F,sep="\t")
+
+#Supplementary Figure 4d-f - Plotting the expression of certain lncRNAs in certain cancers stratified by SV status 
+
+wgs_samples = read.table("../Data/TARGET/CNV_SV_Data/SV/List_WGS_Samples_PerCancer.txt")
+
+#MYCNOS - NBL
+gene = "ENSG00000233718.1"
+cancer = "NBL"
+cancer_df =NBL
+
+
+#MYCNOS - WT
+gene = "ENSG00000233718.1"
+cancer = "WT"
+cancer_df =WT
+
+#KIAA0125 - B-ALL
+gene = "ENSG00000226777.3"
+cancer = "BALL"
+cancer_df = BALL
+
+#MIR181A1HG - AML 
+gene = "ENSG00000229989.3"
+cancer = "AML"
+cancer_df = AML
+
+#CDKN2B-AS1 - B-ALL 
+gene = "ENSG00000240498.2"
+cancer = "BALL"
+cancer_df = BALL
+
+#run separately for each of the sets above
+
+gene_sv = pantarsv_nondp[pantarsv_nondp$V2==gene & pantarsv_nondp$cancer==cancer,]$rna_name
+gene_sv = gsub("-","\\.",gene_sv)
+
+colnames(cancer_df) = gsub(".0.R_.","",colnames(cancer_df))
+colnames(cancer_df) = gsub(".0.R","",colnames(cancer_df))
+cancer_df = data.frame(t(cancer_df[gene,colnames(cancer_df)%in%wgs_samples$V1]))
+cancer_df$SV_mut = "no"
+cancer_df[rownames(cancer_df)%in%gene_sv,]$SV_mut = "yes"
+
+aa = ggplot(cancer_df,aes(SV_mut,cancer_df[,1],fill=SV_mut))+geom_boxplot()+xlab("")+ylab("FPKM\n")+scale_fill_discrete(name="SV")+ggtitle(genes_anno[gene,4])+stat_n_text()+stat_compare_means(label.x=1.25,size=5)
+aa = aa+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"))
+aa =aa+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))
+aa
+
+pdf("MIR18A1HG_AML_SV_Exp.pdf")
+aa
+dev.off()
+
+```
+
+# Overlap between SCNA regions and SVs - Figure 3c and Supplementary Figure 4b
+
+```{r}
+
+pantarsv_annotation = read.table("../Results/Final_PanTarget_SV_Annotation.txt")
+pantarsv_annotation$combo = paste(pantarsv_annotation$Var1,pantarsv_annotation$Var2,sep="_")
+
+#load the CNV GISTIC results:
+
+pantar_cnv = read.table("../Results/PanTarget_CNV_Expression_Results_0820.txt",header=T)
+pantar_cnv$band = genes_anno[as.character(pantar_cnv$gene),9]
+pantar_cnv_lncRNA = pantar_cnv[pantar_cnv$gene%in%noncoding$V1,]
+  
+pantar_cnv$genc = paste(pantar_cnv$gene,pantar_cnv$cancer,sep="_")
+
+#SV thats match CNV
+pantarsv_annotation$CNV_region = "no"
+pantarsv_annotation[pantarsv_annotation$combo%in%pantar_cnv$genc,]$CNV_region = "yes"
+
+# how many of the SV ones that overlap also have significant differential expression
+pantarsv_annotation$CNV_DE = "no"
+pantarsv_annotation[pantarsv_annotation$combo%in%pantar_cnv[pantar_cnv$sig=="yes",]$genc,]$CNV_DE = "yes"
+
+
+########## CNVs that match SVs ##################
+pantarsv_cnv = pantar_cnv[pantar_cnv$genc%in%pantarsv_annotation$combo,]
+temp = aggregate(pantarsv_annotation$Freq,by=list(pantarsv_annotation$combo),FUN=sum)
+rownames(temp) = temp[,1]
+pantarsv_cnv$sv_samples = temp[as.character(pantarsv_cnv$genc),2]
+pantarsv_lncRNA = pantarsv_cnv[pantarsv_cnv$gene%in%noncoding$V1,]
+
+pantarsv_cnv$gene = as.character(pantarsv_cnv$gene)
+pantarsv_cnv$gene_name= as.character(pantarsv_cnv$gene_name)
+temp = pantarsv_cnv[grep("NR_|NM_",pantarsv_cnv$gene_name),]$gene
+pantarsv_cnv[grep("NR_|NM_",pantarsv_cnv$gene_name),]$gene = pantarsv_cnv[grep("NR_|NM_",pantarsv_cnv$gene_name),]$gene_name
+
+pantarsv_cnv[grep("NR_|NM_",pantarsv_cnv$gene),]$gene_name= temp
+
+
+#Supplementary Figure 4b
+
+#plot the percentage of SCNA overlapping SV vs Recurrence of SV
+
+temp  = aggregate(pantarsv_annotation_lncrna$Freq,by=list(pantarsv_annotation_lncrna$combo),FUN=sum)
+temp$gene_name = pantarsv_annotation_lncrna2[as.character(temp$Group.1),]$gene_name
+temp$CNV_region = pantarsv_annotation_lncrna2[as.character(temp$Group.1),]$CNV_region
+temp$gene = pantarsv_annotation_lncrna2[as.character(temp$Group.1),]$Var1
+
+temp$cat = temp$x
+temp[temp$x>1 & temp$x<5,]$cat  = "2-4"
+temp[temp$x>4,]$cat  = "5+"
+temp2 = data.frame(table(temp$cat,temp$CNV_region))
+temp2 = dcast(temp2,Var1~Var2)
+
+temp2$prop = round(temp2$yes/(temp2$yes+temp2$no),2)
+
+qq = ggplot(temp2,aes(Var1,prop))+geom_point()+xlab("\nNumber of Samples w/SV in that lncRNA gene")+ylab("Proportion of SV-impacted lncRNAs located in SCNA region\n")
+qq = qq+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))
+qq =qq+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))
+qq
+
+pdf("SV_Overlap_SCNA_Proportion65.pdf",height = 8)
+qq
+dev.off()
+
+
+#Figure 3c 
+
+#Proportion of lncRNAs impacted by SV and in/near CNV locus: 
+
+#non unique lncRNAs: 238/922 = 0.25.8
+
+#unique lncRNAs: 213/715 = 0.298
+
+pantarsv_cnv_lnc$band_short = gsub("\\...","",pantarsv_cnv_lnc$band)
+pantarsv_cnv_lnc$band_short = gsub("\\..","",pantarsv_cnv_lnc$band_short)
+pantarsv_cnv_lnc$band_short = gsub("p..","p",pantarsv_cnv_lnc$band_short)
+pantarsv_cnv_lnc$band_short = gsub("q..","q",pantarsv_cnv_lnc$band_short)
+
+pantarsv_cnv_lnc$band_short = factor(pantarsv_cnv_lnc$band_short,levels=c("1p","1q","2p","3p","4p","5q","6q","7p","7q","8p","8q","9p","10q","11q","12p","12q","13q","14q","15q","16p","17p","17q","19p","19q","20q","21q","Xp"))
+
+pantarsv_cnv_lnc_amp = pantarsv_cnv_lnc[pantarsv_cnv_lnc$CNV_type=="Amplification",]
+
+pantarsv_cnv_lnc_amp$label = paste(pantarsv_cnv_lnc_amp$gene_name,pantarsv_cnv_lnc_amp$band_short,sep="_")
+
+pantarsv_cnv_lnc_amp$chr_num = factor(pantarsv_cnv_lnc_amp$chr_num,levels=c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,"X"))
+
+#pantarsv_cnv_lnc_amp$band_short = factor(pantarsv_cnv_lnc_amp$band_short,levels=c("1p","1q","2p","3p","4p","5q","6q","7p","7q","8p","8q","9p","10q","11q","12p","12q","13q","14q","15q","16p","17p","17q","19p","19q","20q","21q","Xp"))
+aa = ggplot(pantarsv_cnv_lnc_amp,aes(chr_num,sv_samples,label=label))+geom_point(aes(color=cancer))+geom_text_repel(aes(chr_num, sv_samples, label = label),data=subset(pantarsv_cnv_lnc_amp, sv_samples > 4))+xlab("")+ylab("# samples\n")+scale_color_discrete(name="Cancer") + scale_x_discrete(drop=FALSE)
+aa = aa+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"))
+aa =aa+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=10,color="black"))
+aa
+
+pdf("Label_Genes_SV_Match_CNV_Amp_0920.pdf",width=11)
+aa
+dev.off()
+
+pantarsv_cnv_lnc_del = pantarsv_cnv_lnc[pantarsv_cnv_lnc$CNV_type=="Deletion",]
+
+pantarsv_cnv_lnc_del$label = paste(pantarsv_cnv_lnc_del$gene_name,pantarsv_cnv_lnc_del$band_short,sep="_")
+
+pantarsv_cnv_lnc_del$chr_num = factor(pantarsv_cnv_lnc_del$chr_num,levels=c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,"X"))
+
+#pantarsv_cnv_lnc_del$band_short = factor(pantarsv_cnv_lnc_del$band_short,levels=c("1p","1q","2p","3p","4p","5q","6q","7p","7q","8p","8q","9p","10q","11q","12p","12q","13q","14q","15q","16p","17p","17q","19p","19q","20q","21q","Xp"))
+aa = ggplot(pantarsv_cnv_lnc_del,aes(chr_num,sv_samples,label=label))+geom_point(aes(color=cancer))+geom_text_repel(aes(chr_num, sv_samples, label = label),data=subset(pantarsv_cnv_lnc_del, sv_samples > 5))+xlab("")+ylab("# samples\n")+scale_color_discrete(name="Cancer") + scale_x_discrete(drop=FALSE)+scale_y_reverse()
+aa = aa+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"))
+aa =aa+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=10,color="black"))
+aa
+
+aa = ggplot(pantarsv_cnv_lnc_del,aes(chr_num,sv_samples,label=label))+geom_point(aes(color=cancer))+geom_text_repel(aes(chr_num, sv_samples, label = label),data=subset(pantarsv_cnv_lnc_del, sv_samples > 5))+xlab("")+ylab("# samples\n")+scale_color_discrete(name="Cancer") + scale_x_discrete(drop=FALSE)
+aa = aa+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"))
+aa =aa+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=10,color="black"))
+aa
+
+
+pdf("Label_Genes_SV_Match_CNV_Del_0920.pdf",width=11)
+aa
+dev.off()
+
+```
+
+#Supplementary Figure 4a - The SV type per sample per cancer. Uses the raw SV calls. 
+
+```{r}
+#plot the mutation type across all identified SVs, regardless of prot/lnc overlap
+
+load("../Data/TARGET/CNV_SV_Data/SV/structVariants_CGIalign_lncrnas_apr1_2019.rda")
+sv_df = results_nc_sv_CGI$sv_df
+
+table(as.character(sv_df$Type))
+
+sv_df$med_name = str_sub(rownames(sv_df),1,20) #594 samples, same as the TARGET.USI
+
+#x-axis is one sample, y-axis is number of mutations per that sample, fill is the mutation type - each mutation per sample is unique, tho they may be involved in the same complex/interchromosal mutation 
+
+#factor the samples based on low to high mut/sample per cancer 
+
+aml_temp = as.character(sv_df[grep("TARGET.20",sv_df$TARGET.USI),]$TARGET.USI)
+aml_temp = sort(table(aml_temp))
+ball_temp = as.character(sv_df[grep("TARGET.10",sv_df$TARGET.USI),]$TARGET.USI)
+ball_temp = sort(table(ball_temp))
+nbl_temp = as.character(sv_df[grep("TARGET.30",sv_df$TARGET.USI),]$TARGET.USI)
+nbl_temp = sort(table(nbl_temp))
+wt_temp = as.character(sv_df[grep("TARGET.50",sv_df$TARGET.USI),]$TARGET.USI)
+wt_temp = sort(table(wt_temp))
+
+sv_df = sv_df[sv_df$TARGET.USI%in%c(names(aml_temp),names(ball_temp),names(nbl_temp),names(wt_temp)),]
+
+sv_df$TARGET.USI = factor(sv_df$TARGET.USI,levels=c(names(aml_temp),names(wt_temp),names(nbl_temp),names(ball_temp)))
+
+sv_df = sv_df[,c(1,28)]
+sv_df$Type = gsub("distal-duplication-by-mobile-element","distal-duplication",sv_df$Type)
+sv_df$Type = gsub("probable-inversion","inversion",sv_df$Type)
+
+sv_df$Type = factor(sv_df$Type,levels=c("distal-duplication","inversion","interchromosomal","tandem-duplication","complex","deletion"))
+
+sv_df = data.frame(table(sv_df))
+sv_df = sv_df[sv_df$Freq!=0,]
+
+aa =ggplot(sv_df,aes(sv_df$TARGET.USI,y=sv_df$Freq,fill=sv_df$Type))+geom_bar(stat="identity")+scale_fill_discrete(name="Mutation Type") + xlab("\nSamples")+ylab("Number of Structural Variants\n")
+aa = aa+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"))
+aa =aa+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"),axis.text.x=element_blank(),axis.ticks.x=element_blank(),legend.position = c(0.25,0.75))
+aa
+
+pdf("Mutation_Type_Per_All_SV_Samples.pdf",width=11)
+aa
+dev.off()
+
+```
+
+#Supplementary Figure 4c - lncRNAs per cancer ranked by the number of samples that have an SV in that gene and Supplementary Figure 4g - shared lncRNAs with SVs across cancers
+
+```{r}
+#Make ranked list for each cancer - top SV lncRNAs (rank based on lncRNAs with most samples with SV in the lncRNA)
+
+pantarsv_annotation = read.table("../Data/TARGET/CNV_SV_Data/SV/Final_PanTarget_SV_Annotation.txt")
+
+pantarsv_annotation_lncrna = pantarsv_annotation[pantarsv_annotation$Var1%in%rownames(noncoding_high),] 
+
+all_genes_cancer$combo = paste(all_genes_cancer$X1,all_genes_cancer$X2,sep="_")
+pantarsv_annotation_lncrna = pantarsv_annotation_lncrna[pantarsv_annotation_lncrna$combo%in%all_genes_cancer$combo,]
+
+pantarsv_annotation_lncrna_short = aggregate(pantarsv_annotation_lncrna$Freq,by=list(pantarsv_annotation_lncrna$Var1,pantarsv_annotation_lncrna$Var2),FUN=sum)
+
+pantarsv_annotation_lncrna_short$gname = genes_anno[as.character(pantarsv_annotation_lncrna_short$Group.1),4]
+
+pantarsv_annotation_lncrna_short = pantarsv_annotation_lncrna_short[order(pantarsv_annotation_lncrna_short$x,decreasing=T),]
+pantarsv_annotation_lncrna_short$rank = 0 
+
+pantarsv_annotation_lncrna_short[pantarsv_annotation_lncrna_short$Group.2=="BALL",]$rank = 1:length(pantarsv_annotation_lncrna_short[pantarsv_annotation_lncrna_short$Group.2=="BALL",]$rank)
+pantarsv_annotation_lncrna_short[pantarsv_annotation_lncrna_short$Group.2=="AML",]$rank = 1:length(pantarsv_annotation_lncrna_short[pantarsv_annotation_lncrna_short$Group.2=="AML",]$rank)
+pantarsv_annotation_lncrna_short[pantarsv_annotation_lncrna_short$Group.2=="NBL",]$rank = 1:length(pantarsv_annotation_lncrna_short[pantarsv_annotation_lncrna_short$Group.2=="NBL",]$rank)
+pantarsv_annotation_lncrna_short[pantarsv_annotation_lncrna_short$Group.2=="WT",]$rank = 1:length(pantarsv_annotation_lncrna_short[pantarsv_annotation_lncrna_short$Group.2=="WT",]$rank)
+
+pantarsv_annotation_lncrna_short$Group.2 = factor(pantarsv_annotation_lncrna_short$Group.2,levels=c("BALL","NBL","AML","WT"))
+
+pantarsv_annotation_lncrna_short$gname = as.character(pantarsv_annotation_lncrna_short$gname)
+pantarsv_annotation_lncrna_short$Group.1 = as.character(pantarsv_annotation_lncrna_short$Group.1)
+
+pantarsv_annotation_lncrna_short[grep("NR_|NM",pantarsv_annotation_lncrna_short$gname),]$gname =pantarsv_annotation_lncrna_short[grep("NR_|NM",pantarsv_annotation_lncrna_short$gname),]$Group.1 
+pantarsv_annotation_lncrna_short$chr = genes_anno[pantarsv_annotation_lncrna_short$Group.1,5]
+
+pantarsv_annotation_lncrna_short$gname =paste(pantarsv_annotation_lncrna_short$gname,pantarsv_annotation_lncrna_short$chr,sep="_")
+
+aa = ggplot(pantarsv_annotation_lncrna_short,aes(pantarsv_annotation_lncrna_short$rank,pantarsv_annotation_lncrna_short$x,label=pantarsv_annotation_lncrna_short$gname))+geom_point()+geom_text_repel(aes(rank, x, label = gname),size=2,data=subset(pantarsv_annotation_lncrna_short, pantarsv_annotation_lncrna_short$rank<5))+facet_wrap( ~ Group.2,scales="free")+xlab("\nRank")+ylab("# of Samples\n")
+aa = aa+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"))
+aa =aa+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))
+aa
+
+pdf("Rank_SV_lncRNA_PerCancer_IntronInclProm_0720.pdf")
+aa
+dev.off()
+
+
+# Supplementary Figure 4g - shared SV mutated lncRNAs across cancers
+
+shared = rbind(pantarsv_annotation_lncrna_short)
+shared = data.frame(table(shared$Group.1))
+shared$gname = genes_anno[as.character(shared$Var1),4]
+shared$type = "none"
+shared[shared$Var1%in%rownames(noncoding),]$type = "lncRNA"
+shared = data.frame(table(shared$Freq,shared$type))
+
+aa = ggplot(shared,aes(as.numeric(as.character(shared$Var1)),shared$Freq,color=shared$Var2,label=shared$Freq))+geom_point()+geom_text_repel()+geom_line()+xlab("\n Shared # of Cancers") + ylab("Number of Genes\n")+scale_color_discrete(name="Gene Type")
+aa = aa+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"))
+aa =aa+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))
+aa
+
+pdf("../Results/Shared_SV_lncRNAs_IntronInclProm.pdf",height=5,width=7)
+aa
+dev.off()
+
+```
+

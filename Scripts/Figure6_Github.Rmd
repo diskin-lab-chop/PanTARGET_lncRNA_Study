@@ -1,0 +1,474 @@
+---
+title: "Figure 6 and Supplementary Figure 8"
+output: html_notebook
+---
+
+#Gene annotation and expression matrix data: 
+
+```{r}
+
+#loads the gene annotation files used in this study
+
+#genes_anno - all genes considered and their position, gene type, locus etc - Data associated with Supplementary Table 2
+#protein,non_coding - subset of genes_anno based on gene_type
+#all_genes_cancer,exp_cutoff_genes - gene annotation for genes that pass filtering threshold (at least 1 FPKM in 20% of samples)
+
+load("../Data/TARGET/PanCancer_lncRNA_AnnotationFiles_030121.rda")
+
+
+#loads the expression matrix (fpkm) for all samples used in this study 
+
+#fpkm - total expression matrix of all samples and alll genes 
+#fpkm_list - list of dataframes with each cancer gene exp matrix after filtering out low exp genes
+
+load("../Data/TARGET/PanCancer_lncRNA_ExpFiles_030121.rda")
+
+```
+
+#Figure 6a 
+
+```{r}
+
+library(reshape2)
+library(ggpubr)
+
+load("../Data/TARGET/CNV_SV_Data/sca_summary.rda")
+rm(mat11d,mat11q,mat17d,mat17q,mat1d,mat1p,mat3p,mat3d)
+
+#All Stage 4 + Non-Amplified Samples
+
+metaData = metaData[metaData$MYCN_status=="Not Amplified",]
+
+metaData$short_name = substr(metaData$Names,11,16)
+metaData$gain_17q = "No gain"
+metaData[metaData$short_name%in%SCA$q17gain,]$gain_17q = "17q gain"
+
+gene = genes_anno[genes_anno$V4%in%c("RP11-332H18.4","TBX2"),1]
+NBL_gene = data.frame(t(NBL[rownames(NBL)%in%gene,]))
+NBL_gene$gain_17q = "Unknown"
+NBL_gene = NBL_gene[rownames(NBL_gene)%in%rownames(metaData),]
+
+NBL_gene$gain_17q = metaData[rownames(NBL_gene),]$gain_17q
+
+
+NBL_gene$gain_17q = factor(NBL_gene$gain_17q,levels=c("No gain","17q gain"))
+
+NBL_gene  = melt(NBL_gene)
+
+NBL_gene$variable  = genes_anno[as.character(NBL_gene$variable),4]
+
+NBL_gene$variable = gsub("RP11-332H18.4","TBX2-AS1",NBL_gene$variable)
+
+NBL_gene$gain_17q = gsub("No gain","No gain (n = 55)",NBL_gene$gain_17q)
+NBL_gene$gain_17q = gsub("17q gain","17q gain (n = 106)",NBL_gene$gain_17q)
+
+NBL_gene$gain_17q = factor(NBL_gene$gain_17q,levels=c("No gain (n = 55)","17q gain (n = 106)"))
+
+
+aa = ggplot(NBL_gene,aes(NBL_gene$variable,NBL_gene$value,fill=NBL_gene$gain_17q)) + geom_boxplot()+ xlab("\n17q gain Status") + ylab("FPKM\n")+scale_fill_discrete(name="")
+aa = aa+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+aa =aa+theme(text = element_text(size=25,color="black"),axis.text = element_text(size=25,color="black"),legend.position = c(0.75,0.75))
+aa
+
+pdf("TBX2+TBX2AS1_GeneExp_17qStat_V2.pdf")
+plot(aa)
+dev.off()
+```
+
+
+#Figure 6b-d - TBX2-AS1 lncmod results
+
+```{r}
+
+pantarget_lncmod = read.delim("../Results/All_lncMod_Results_Anno.txt",stringsAsFactors = F)
+
+pantarget_lncmod = pantarget_lncmod[pantarget_lncmod$cancer=="NBL",]
+
+# filter for TBX2-AS1
+pantarget_lncmod = pantarget_lncmod[pantarget_lncmod$lncRNA=="ENSG00000267280.1",]
+top_tf = data.frame(table(pantarget_lncmod$TF))
+top_tf$name = genes_anno[as.character(top_tf$Var1),4]
+
+top_tf = top_tf[order(top_tf$Freq,decreasing = T),]
+
+top_tf$name = factor(top_tf$name,levels=top_tf$name)
+top_tf = top_tf[1:25,]
+
+w=ggplot(top_tf,aes(name,Freq))+geom_bar(stat="identity")
+w = w+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+w =w+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black",angle=90))+scale_fill_brewer(palette="Set1",name = "Gene Types")+xlab("")+ylab("Number of target genes\n")
+w
+
+pdf("TopTF_TBX2_AS1_0420.pdf",height=9,width=15)
+w
+dev.off()
+
+
+#plot the pathways that TBX2-AS1 is involved in 
+
+top_path = pantarget_lncmod[pantarget_lncmod$hallmark!="None",]
+top_path = data.frame(table(top_path$hallmark))
+top_path = top_path[order(top_path$Freq),]
+top_path$Var1 = factor(top_path$Var1,levels=top_path$Var1)
+
+top_path = top_path[27:31,]
+
+w=ggplot(top_path,aes(Var1,Freq))+geom_bar(stat="identity")+coord_flip()
+w = w+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+w =w+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))+scale_fill_brewer(palette="Set1",name = "Gene Types")+xlab("")+ylab("\nNumber of target genes")
+w
+
+pdf("TopPathway_TBX2_AS1_0420.pdf",height=9,width=15)
+w
+dev.off()
+
+
+cancer = cancer[,colnames(cancer)%in%rownames(metaData)]
+
+temp = cancer[rownames(cancer)%in%as.character(pro_path[pro_path$lnc_TF=="RP11-332H18.4+E2F1",]$TargetGene),]
+temp = rbind(cancer["ENSG00000101412.9",],temp) #TF
+temp = rbind(cancer["ENSG00000121068.9",],temp) #TBX2
+temp = rbind(cancer["ENSG00000267280.1",],temp) #lncRNA
+name = genes_anno[rownames(temp),4]
+temp = temp[,order(temp[1,])]
+
+bottom = floor(length(cancer)*0.25)
+top = (length(cancer)-floor(length(cancer)*0.25))+1
+temp= temp[,c(1:bottom,top:length(cancer))]
+
+temp[,1:bottom] = temp[,colnames(sort(temp[2,1:bottom]))]
+temp[,(bottom+1):length(temp)] = temp[,colnames(sort(temp[2,(bottom+1):length(temp)]))]
+
+triplet =temp
+
+triplet = data.frame(t(scale(t(log10(triplet+1)),center=T,scale=T)))
+
+row_anno = pro_path[pro_path$TargetGene%in%rownames(triplet[-3,]) & pro_path$lnc_TF=="RP11-332H18.4+E2F1",]$hallmark
+
+row_anno = data.frame(c("","","",row_anno))
+
+rownames(triplet)= name
+
+rownames(row_anno)= name
+colnames(row_anno) = "Hallmark"
+row_anno$extra = row_anno[,1]
+row_anno = row_anno[order(row_anno$Hallmark),]
+
+triplet = triplet[rownames(row_anno),]
+
+row_anno$extra = NULL
+
+#triplet = triplet[c(2,3,1),]
+
+colors = colorRampPalette(c("blue","white", "red"), space="rgb")(64)
+
+temp=  c(colnames(sort(triplet["E2F1",1:23])),colnames(sort(triplet["E2F1",24:46])))
+triplet = triplet[,temp]
+
+aa=pheatmap(triplet,cluster_rows=F, show_colnames=F,show_rownames=T,cluster_cols=F, color=colors,fontsize = 16,annotation_row = row_anno,gaps_col = 40,gaps_row=c(1,2,3,13,18,20,21),border_color = NA)
+aa
+
+aa=pheatmap(triplet,cluster_rows=F, show_colnames=F,show_rownames=T,cluster_cols=F, color=colors,fontsize = 16,annotation_row = row_anno,gaps_col = 23,border_color = NA)
+aa
+
+pdf("NBL_TBX2AS1_ProPath_E2F1_Genes_Heatmap_0420.pdf",height=9,width=15)
+aa
+dev.off()
+
+```
+
+#Figure 6i and Supplementary Figure 8g  - Here we are performing differential expression between siNTC and isTBX2-AS1 treated NLF cells that have been transcriptomically profiled (RNA-seq). Also includes input for iRegulon files 
+
+#DESeq2 analysis: 
+
+```{r}
+
+
+library(dplyr)
+library(reshape2)
+library(DESeq2)
+
+load("../Results/NLF_TBX2_AS1_Exp_Transcript_Filt_Count.rda")
+nlf_count = samples
+rm(samples)
+nlf_count$gene = trans_length[as.character(nlf_count$transcript),]$Gene
+
+nlf_count = nlf_count[,!(colnames(nlf_count)%in%c("chr","start","stop","transcript"))]
+
+nlf_count_gene = nlf_count%>%group_by(gene)%>% summarise_if(is.numeric, funs(sum))
+
+nlf_count_gene  = as.data.frame(nlf_count_gene)
+rownames(nlf_count_gene) =nlf_count_gene$gene
+nlf_count_gene$gene = NULL
+
+nlf_count_gene = nlf_count_gene[rownames(nlf_count_gene)%in%genes_anno$V1,]
+
+#further only keep genes that have at least 1 sample with exp
+nlf_gene = nlf_gene[rowSums(nlf_gene)>0,]
+nlf_count_gene = nlf_count_gene[rowSums(nlf_count_gene)>0,]
+nlf_count_gene = nlf_count_gene[rownames(nlf_count_gene)%in%rownames(nlf_gene),]
+
+nlf_count_gene_ori = nlf_count_gene
+
+nlf_count_gene = nlf_count_gene_ori
+
+metaData = data.frame(colnames(nlf_count_gene))
+metaData$cond = "None"
+colnames(metaData) = c("Name","Condition")
+metaData$Name = gsub("ASI","AS1",metaData$Name)
+metaData[grep("TBX2",metaData$Name),]$Condition = "siTBX2"
+metaData[grep("NTC",metaData$Name),]$Condition = "siNTC"
+metaData[grep("AS1",metaData$Name),]$Condition = "siAS1"
+
+rownames(metaData) = metaData$Name
+colnames(nlf_count_gene) = rownames(metaData)
+
+#siNTC vs siAS1
+metaData = metaData[metaData$Condition!="siTBX2",]
+nlf_count_gene = nlf_count_gene[,colnames(nlf_count_gene)%in%rownames(metaData)]
+
+dds=DESeqDataSetFromMatrix(countData=nlf_count_gene,colData=metaData,design=~Condition)
+dds=DESeq(dds,parallel = T,BPPARAM=MulticoreParam(10))
+#res_stage=results(dds_stage,cooksCutoff=F, contrast = c("Vital_Status","Dead", "Alive"))
+res_stage=results(dds,cooksCutoff=T,contrast = c("Condition","siAS1", "siNTC"))
+
+resultsNames(dds)
+
+resLFC <- lfcShrink(dds, coef="Condition_siNTC_vs_siAS1", type="apeglm")
+
+as1_degenes = data.frame(res_stage)
+as1_degenes$gene_name = genes_anno[rownames(as1_degenes),4]
+
+#plot MA plot 
+
+plotMA(res_stage, ylim=c(-2,2))
+
+#removes genes with low counts in a non-abitrary/non-threshold manner 
+plotMA(resLFC, ylim=c(-2,2))
+
+#plot specific genes:
+
+plotCounts(dds, gene="ENSG00000121068.9", intgroup="Condition")
+
+#plot PCA 
+vsd <- vst(dds, blind=FALSE)
+plotPCA(vsd, intgroup=c("Condition"))
+
+#ggplot method: 
+rld <- rlog(dds, blind=FALSE)
+
+data <- plotPCA(rld, intgroup=c("Condition"), returnData=TRUE)
+percentVar <- round(100 * attr(data, "percentVar"))
+ggplot(data, aes(PC1, PC2, color=Condition)) +
+geom_point(size=3) +
+xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+ylab(paste0("PC2: ",percentVar[2],"% variance"))
+
+#plot samples to determine if any particular sample has outliers 
+
+par(mar=c(8,5,2,2))
+boxplot(log10(assays(dds)[["cooks"]]), range=0, las=2)
+
+#plot volcano plot: with only genes that have adj p-value
+
+ggplot(as1_degenes[!is.na(as1_degenes$padj),],aes(log2FoldChange,-log10(padj)))+geom_point()
+
+library(EnhancedVolcano)
+
+EnhancedVolcano(res_stage,
+    lab = genes_anno[rownames(res_stage),4],
+    x = 'log2FoldChange',
+    y = 'pvalue',
+    title = 'siAS1 vs siNTC',
+    pCutoff = 0.01119,
+    FCcutoff = 0.58,
+    pointSize = 3.0,
+    labSize = 6.0)+xlim(-10,10)
+
+#Supplementary Figure 8g here: 
+
+EnhancedVolcano(res_stage,
+    lab = genes_anno[rownames(res_stage),4],
+    x = 'log2FoldChange',
+    y = 'pvalue',
+    title = 'siAS1 vs siNTC',
+    pCutoff = 0.00422,
+    FCcutoff = 1,
+    pointSize = 3.0,
+    labSize = 6.0)+xlim(-10,10)
+
+
+geneset = genes_anno[rownames(as1_degenes),4]
+geneset = geneset[grep("MSTRG|lnc-",geneset,invert=T)]
+temp = genes_anno[genes_anno$V4%in%geneset[grep("NR_|NM_",geneset)],]
+rownames(temp) = temp$V4
+geneset[grep("NR_|NM_",geneset)] = temp[geneset[grep("NR_|NM_",geneset)],1]
+background = geneset
+geneset = as1_degenes[as1_degenes$log2FoldChange>0.58 & as1_degenes$padj<0.1,]
+geneset = geneset[!is.na(geneset$padj),]
+geneset = genes_anno[rownames(geneset[grep("MSTRG|lnc-",geneset,invert=T)]),4]
+temp = genes_anno[genes_anno$V4%in%geneset[grep("NR_|NM_",geneset)],]
+rownames(temp) = temp$V4
+geneset[grep("NR_|NM_",geneset)] = temp[geneset[grep("NR_|NM_",geneset)],1]
+geneset_up = geneset
+geneset = as1_degenes[as1_degenes$log2FoldChange<(-0.58) & as1_degenes$padj<0.1,]
+geneset = geneset[!is.na(geneset$padj),]
+geneset = genes_anno[rownames(geneset[grep("MSTRG|lnc-",geneset,invert=T)]),4]
+temp = genes_anno[genes_anno$V4%in%geneset[grep("NR_|NM_",geneset)],]
+rownames(temp) = temp$V4
+geneset[grep("NR_|NM_",geneset)] = temp[geneset[grep("NR_|NM_",geneset)],1]
+geneset_down = geneset
+
+
+#Input for iRegulon analysis:
+
+write.table(geneset_up,"siAS1_iRegulon_GenesUp.txt",quote=F,row.names=F)
+write.table(geneset_down,"siAS1_iRegulon_GenesDown.txt",quote=F,row.names=F)
+
+```
+
+#Figure 6i - iRegulon results - down regulated genes 
+
+```{r}
+#pull the target genes of the relevant transcription factors and see if their fold change differs for each of the TFs  
+
+reg_as1_down = read.csv("iRegulon_TF_TargetGenes_siAS1_Down.csv",header=F)
+e2f_targets = c(as.character(unlist(reg_as1_down[2,6:164])),as.character(unlist(reg_as1_down[4,6:164])))
+e2f_targets = e2f_targets[e2f_targets!=""]
+e2f_targets = e2f_targets[!duplicated(e2f_targets)]
+
+as1_degenes = as1_degenes[!is.na(as1_degenes$padj),]
+
+as1_degenes$e2f_targets = "no"
+as1_degenes[as1_degenes$gene_name%in%e2f_targets,]$e2f_targets = "yes"
+
+myb_targets = c(as.character(unlist(reg_as1_down[1,6:164])),as.character(unlist(reg_as1_down[6,6:164])))
+myb_targets = myb_targets[myb_targets!=""]
+myb_targets = myb_targets[!duplicated(myb_targets)]
+
+as1_degenes$myb_targets = "no"
+as1_degenes[as1_degenes$gene_name%in%myb_targets,]$myb_targets = "yes"
+
+as1_degenes$targets = "no"
+as1_degenes[as1_degenes$gene_name%in%e2f_targets,]$targets = "e2f"
+as1_degenes[as1_degenes$gene_name%in%myb_targets,]$targets = "myb"
+
+both = intersect(as1_degenes[as1_degenes$e2f_targets=="yes",]$gene_name,as1_degenes[as1_degenes$myb_targets=="yes",]$gene_name) #49 overlap between the targets 
+
+```
+
+#Figure 6i - iRegulon results - up regulated genes 
+
+```{r}
+#pull the target genes of the relevant transcription factors and see if their fold change differs for each of the TFs  
+
+
+reg_as1_up = read.csv("iRegulon_TF_TargetGenes_siAS1_Up.csv",header=F)
+rest = reg_as1_up[grep("REST",reg_as1_up$V5),]
+rest = t(rest[,6:81])
+
+rest_list = c()
+for (num in 1:54){
+  rest_list = c(rest_list,as.character(unlist(rest[,num])))
+}
+
+rest_list = rest_list[!duplicated(rest_list)]
+rest_list = rest_list[rest_list!=""]
+
+rfx = reg_as1_up[grep("RFX.",reg_as1_up$V5),]
+rfx = t(rfx[,6:81])
+
+rfx_list = c()
+for (num in 1:19){
+  rfx_list = c(rfx_list,as.character(unlist(rfx[,num])))
+}
+
+rfx_list = rfx_list[!duplicated(rfx_list)]
+rfx_list = rfx_list[rfx_list!=""]
+
+intersect(rest_list,rfx_list) #56
+
+#REST = 170
+#RFX = 100
+
+
+as1_degenes = as1_degenes[!is.na(as1_degenes$padj),]
+
+as1_degenes$e2f_targets = "no"
+as1_degenes[as1_degenes$gene_name%in%e2f_targets,]$e2f_targets = "yes"
+
+myb_targets = c(as.character(unlist(reg_as1_up[1,6:164])),as.character(unlist(reg_as1_up[6,6:164])))
+myb_targets = myb_targets[myb_targets!=""]
+myb_targets = myb_targets[!duplicated(myb_targets)]
+
+as1_degenes$myb_targets = "no"
+as1_degenes[as1_degenes$gene_name%in%myb_targets,]$myb_targets = "yes"
+
+as1_degenes$targets = "no"
+as1_degenes[as1_degenes$gene_name%in%e2f_targets,]$targets = "e2f"
+as1_degenes[as1_degenes$gene_name%in%myb_targets,]$targets = "myb"
+
+both = intersect(as1_degenes[as1_degenes$e2f_targets=="yes",]$gene_name,as1_degenes[as1_degenes$myb_targets=="yes",]$gene_name) #49 overlap between the targets 
+
+as1_degenes[as1_degenes$gene_name%in%both,]$targets = "both"
+
+as1_degenes$reg = "up"
+as1_degenes[as1_degenes$log2FoldChange>0,]$reg = "up"
+
+as1_degenes_sig = as1_degenes[!is.na(as1_degenes$padj),]
+as1_degenes_sig = as1_degenes_sig[as1_degenes_sig$padj<0.1,]
+as1_degenes_sig = as1_degenes_sig[abs(as1_degenes_sig$log2FoldChange)>0.58,]
+
+
+```
+
+
+#Supplementary Figure 8a - can be generated using gene expression function in Figure 2 script. 
+
+#Supplementary Figure 8b
+
+```{r}
+#We selected TBX2-AS1 as our top prioritized lncRNA. It is dysregulated due to CNV, tissue specific, a lncRNA modulator, and CRC regulated. Here we took targets of the correlated protein coding gene TBX2. Targets of TBX2 that changed in expression upon knockdown of TBX2. We assesed the correlation of both TBX2/TBX2-AS to these genes. 
+
+#Expression correlation between FOXM1/E2F genes and TBX2 + TBX2-AS1
+
+#correlation in non-amp Stage 4 samples - 92 total samples 
+
+metaData = metaData[metaData$MYCN_status=="Not Amplified",]
+
+gene1 = genes_anno[genes_anno$V4=="TBX2",1]
+gene2 = genes_anno[genes_anno$V4=="RP11-332H18.4",1]
+
+cor.test(as.numeric(NBL[gene1,colnames(NBL)%in%rownames(metaData)]),as.numeric(NBL[gene2,colnames(NBL)%in%rownames(metaData)]),method="spearman")
+
+#make correlation heatmap like plot:
+
+library(corrplot)
+library(RColorBrewer)
+
+genes_interest = c(genes_anno[genes_anno$V4=="TBX2",1],genes_anno[genes_anno$V4=="RP11-332H18.4",1],genes_anno[genes_anno$V4=="MYCN",1],genes_anno[genes_anno$V4=="FOXM1",1],genes_anno[genes_anno$V4=="CDKN2A",1],genes_anno[genes_anno$V4=="E2F4",1],genes_anno[genes_anno$V4=="E2F1",1],genes_anno[genes_anno$V4=="TFDP1",1],genes_anno[genes_anno$V4=="TFDP3",1],genes_anno[genes_anno$V4=="MYBL2",1],genes_anno[genes_anno$V4=="REST",1],genes_anno[genes_anno$V4=="EP300",1],genes_anno[genes_anno$V4=="CCDN1",1],genes_anno[genes_anno$V4=="CDK4",1],genes_anno[genes_anno$V4=="MYC",1],genes_anno[genes_anno$V4=="TP53",1])
+
+genes_interest = rev(genes_interest)
+
+tbx2_subset = NBL[rownames(NBL)%in%genes_interest,colnames(NBL)%in%rownames(metaData)]
+
+tbx2_subset_cor = cor(t(tbx2_subset),method="spearman")
+
+rownames(tbx2_subset_cor) = genes_anno[rownames(tbx2_subset_cor),4]
+colnames(tbx2_subset_cor) = genes_anno[colnames(tbx2_subset_cor),4]
+
+
+pdf("Correlation_TBX2_Genes.pdf",width=7.5)
+corrplot(tbx2_subset_cor, method="circle",order="hclust",col=brewer.pal(n=8, name="RdBu"),addrect = 2)
+dev.off()
+
+
+```
+
+
+
+
+

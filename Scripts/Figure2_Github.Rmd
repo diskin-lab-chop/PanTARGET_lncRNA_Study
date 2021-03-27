@@ -1,0 +1,1035 @@
+---
+title: "Figure 2 and Supplementary Figure 2"
+output: html_notebook
+---
+
+#Gene annotation and expression matrix data: 
+
+```{r}
+
+#loads the gene annotation files used in this study
+
+#genes_anno - all genes considered and their position, gene type, locus etc - Data associated with Supplementary Table 2
+#protein,non_coding - subset of genes_anno based on gene_type
+#all_genes_cancer,exp_cutoff_genes - gene annotation for genes that pass filtering threshold (at least 1 FPKM in 20% of samples)
+
+load("../Data/TARGET/PanCancer_lncRNA_AnnotationFiles_030121.rda")
+
+
+#loads the expression matrix (fpkm) for all samples used in this study 
+
+#fpkm - total expression matrix of all samples and alll genes 
+#fpkm_list - list of dataframes with each cancer gene exp matrix after filtering out low exp genes
+
+load("../Data/TARGET/PanCancer_lncRNA_ExpFiles_030121.rda")
+
+```
+
+# Tau score analysis of TARGET samples 
+
+```{r}
+
+#Calculate tau score using formula. Requires first to calculate the mean of all gene expression per cancer. 
+
+fpkm_tau = fpkm[rownames(fpkm)%in%c(exp_cutoff_genes$V1),]
+
+AML = rowMeans(fpkm_tau[,grep("TARGET.20",colnames(fpkm_tau))])
+ALL = fpkm_tau[,grep("TARGET.10",colnames(fpkm_tau))]
+TALL = rowMeans(ALL[,1:244])
+BALL = rowMeans(ALL[,245:434])
+NBL = rowMeans(fpkm_tau[,grep("TARGET.30",colnames(fpkm_tau))])
+WT = rowMeans(fpkm_tau[,grep("TARGET.50",colnames(fpkm_tau))])
+RT = rowMeans(fpkm_tau[,grep("TARGET.52",colnames(fpkm_tau))])
+
+fpkm_tau = cbind(AML,BALL,TALL,RT,WT,NBL)
+fpkm_tau = fpkm_tau[rowSums(fpkm_tau)>0,]
+
+a1 <- fpkm_tau            # expression matrix
+m <- 5             # No of tissues - 1
+
+a1 <- round(a1,3)
+dim1 <- dim(a1)[1]
+
+s <- matrix(0,nrow=dim(a1)[1],ncol=2, dimnames = list(rownames(a1), c("Tissue_specific_index","Tissue_name")))
+
+for(ii in 1:dim1){
+  #break
+  print(ii)
+  
+  temp =fpkm_tau[ii,]
+  xhat = (temp)/max(temp)
+  s[ii,1] <- sum(1-xhat)/m
+  s[ii,2] <- names(temp[temp==max(temp)])
+}
+s_ori = s
+s = data.frame(s)
+
+#write.table(s, file="PanTARGET_AllGenes_TissueSpecificScore_040120.txt",row.names=TRUE, sep="\t", quote= FALSE)
+
+```
+
+# Figure 2a  and Supplementary Table 5 - Plot the tau score per gene type and make a table
+
+```{r}
+
+#Plot the results from the tau score, a) density plot of tau scores per gene type (eg lncRNAs, protein, etc)
+
+library(reshape2)
+
+
+#load the tau scores
+
+tau_score = read.table("PanTARGET_AllGenes_TissueSpecificScore_040120.txt")
+
+
+#match genes to what is in current annotation 
+tau_score = tau_score[rownames(tau_score)%in%rownames(genes_anno),]
+
+length(exp_cutoff_genes[!(exp_cutoff_genes$V1%in%rownames(tau_score)),1])
+
+#annotate the tau score genes with HUGO gene name and gene type: complex/simple names 
+
+tau_score$gene_name = genes_anno[rownames(tau_score),4]
+tau_score$gene_type = genes_anno[rownames(tau_score),3]
+tau_score$gene_type_simple =as.character(tau_score$gene_type)
+tau_score[grep("protein",tau_score$gene_type),5] = "protein"
+tau_score[grep("lncRNA|noncoding",tau_score$gene_type),5] = "lncRNA"
+tau_score[grep("MSTRG_Non_coding_lncRNA|novel_gene_coding_or_noncoding",tau_score$gene_type),5] = "novel_lncRNA"
+tau_score[grep("lnc-",tau_score$gene_name),5] = "novel_lncRNA"
+tau_score = tau_score[grep("protein|lncRNA|novel_lncRNA",tau_score$gene_type_simple),]
+
+#reduce set to only those w/high conf expression - main figure
+
+tau_score =tau_score[rownames(tau_score)%in%exp_cutoff_genes$V1,]
+
+sort(table(tau_score[(tau_score$gene_type_simple=="lncRNA" | tau_score$gene_type_simple=="novel_lncRNA") & as.numeric(as.character(tau_score$Tissue_specific_index))>0.8,]$Tissue_name))
+
+#protein coding genes? 
+
+sort(table(tau_score[(tau_score$gene_type_simple=="protein") & as.numeric(as.character(tau_score$Tissue_specific_index))>0.8,]$Tissue_name))
+
+#plot density plot 
+
+q =ggplot(tau_score,aes(x=as.numeric(as.character(tau_score$Tissue_specific_index)),color=gene_type_simple)) + geom_density(size=1)+xlab("\ntau: tissue specificity index")+ylab("density\n")+scale_y_continuous(expand = c(0, 0))
+q = q+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+q =q+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"),legend.position = c(0.5, 0.75))+scale_color_brewer(palette="Set1",name = "Gene Types")
+q
+
+png("../Results/PanTarget_TauScore_GeneTypes_040120.png")
+plot(q)
+dev.off()
+
+pdf("../Results/PanTarget_TauScore_GeneTypes_040120.pdf")
+plot(q)
+dev.off()
+
+#remove non-polyA genes - data from 
+
+hela_polya = read.csv("../Data/polyA_Annotation/13059_2010_2480_MOESM6_ESM.csv",stringsAsFactors =F)
+h9_polya = read.csv("../Data/polyA_Annotation/13059_2010_2480_MOESM5_ESM.csv",stringsAsFactors =F)
+
+non_poly_genes_anno = genes_anno[genes_anno$V4%in%c(hela_polya$Gene,h9_polya$Gene),]
+
+tau_score$polyA = "yes"
+tau_score[rownames(tau_score)%in%non_poly_genes_anno$V1,]$polyA = "no"
+
+q =ggplot(tau_score[tau_score$polyA=="yes",],aes(x=as.numeric(as.character(Tissue_specific_index)),color=gene_type_simple)) + geom_density(size=1)+xlab("\ntau: tissue specificity index")+ylab("density\n")+scale_y_continuous(expand = c(0, 0))
+q = q+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+q =q+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"),legend.position = c(0.5, 0.75))+scale_color_brewer(palette="Set1",name = "Gene Types")
+q
+
+pdf("../Results/PanTarget_TauScore_GeneTypes_noPolyA_040120.png")
+plot(q)
+dev.off()
+
+
+#remove these genes from the tau score
+
+sort(table(tau_score[tau_score$polyA=="no" & tau_score[,1]>=0.8,]$Tissue_name))
+sort(table(tau_score_lncs[tau_score_lncs$polyA=="no" & tau_score_lncs[,1]>=0.8,]$Tissue_name))
+
+tau_score = tau_score[tau_score$polyA=="yes",]
+
+#Supplementary Table 5 Here:
+#write.table(tau_score,"Supp_Table5_TauScore.txt",quote=F,col.names=F,sep="\t")
+
+#t-test p-values comparing tau score for gene types: 
+
+tau_score$gene_type_simple = factor(tau_score$gene_type_simple,levels=c("protein","lncRNA","novel_lncRNA"))
+
+library(ggpubr)
+ggplot(tau_score,aes(gene_type_simple,Tissue_specific_index))+geom_boxplot(notch = T)
+
+#protein vs lncRNA
+t.test(tau_score[tau_score$gene_type_simple=="protein",1], tau_score[tau_score$gene_type_simple=="lncRNA",1], var.equal = TRUE) #p.val = 6.021835e-169
+
+#protein vs novel_lncRNA
+t.test(tau_score[tau_score$gene_type_simple=="protein",1], tau_score[tau_score$gene_type_simple=="novel_lncRNA",1], var.equal = TRUE) #p.val = 1.162634e-42
+
+#known vs novel lncRNA
+t.test(tau_score[tau_score$gene_type_simple=="lncRNA",1], tau_score[tau_score$gene_type_simple=="novel_lncRNA",1], var.equal = TRUE) #p.val < 3.39e-13
+
+#correlation between tau score and mean expression of the gene across all samples 
+
+tau_score$mean = rowMeans(fpkm[rownames(tau_score),])
+
+plot(tau_score$Tissue_specific_index,log10(tau_score$mean+1))
+
+cor.test(tau_score$Tissue_specific_index,log2(tau_score$mean+1))
+
+
+```
+
+# Figure 2b - Number of tissue specific genes per cancer type/lnc type. 
+
+```{r}
+# Must run the tau score analysis in order to run this chunk. Plot the number of tissue specific genes per type per cancer (lncRNA/novel)
+
+tau_score_sig = tau_score[as.numeric(as.character(tau_score$Tissue_specific_index))>=0.8,]
+
+tau_score_sig_lnc = tau_score_sig[grep("lncRNA",tau_score_sig$gene_type_simple),]
+
+tau_score_sig_lnc$Combo = paste(tau_score_sig_lnc$Tissue_name,tau_score_sig_lnc$gene_type_simple,sep="_")
+
+tau_score_sig_lnc = data.frame(table(tau_score_sig_lnc[tau_score_sig_lnc$polyA=="yes",]$Combo))
+
+tau_score_sig_lnc$Cancer = gsub("_protein|_lncRNA|_novel_lncRNA","",tau_score_sig_lnc$Var1)
+
+tau_score_sig_lnc$genetype = gsub("AML_|BALL_|TALL_|NBL_|WT_|RT_","",tau_score_sig_lnc$Var1)
+
+tau_score_sig_lnc = tau_score_sig_lnc[order(tau_score_sig_lnc$Freq),]
+
+#tau_score_sig_lnc$Cancer = gsub("NBL","NBL_GMKF",tau_score_sig_lnc$Cancer)
+
+tau_score_sig_lnc$Cancer = factor(tau_score_sig_lnc$Cancer,levels=c("AML","RT","BALL","TALL","WT","NBL"))
+
+tau_score_sig_lnc$genetype = factor(tau_score_sig_lnc$genetype,levels=c("novel_lncRNA","lncRNA"))
+
+
+# no polyA genes 
+
+w= ggplot(tau_score_sig_lnc,aes(x=Cancer,y=Freq,fill=genetype)) + geom_bar(stat="identity")+xlab("")+ylab("Tissue specific lncRNAs\n")+scale_y_continuous(expand=c(0,0))
+w = w+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+w =w+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"),legend.position = c(0.5, 0.75))+scale_fill_brewer(palette="Set1",name = "Gene Types")
+w
+
+pdf("PanTarget_lncRNA_ALLGeneType_Frequency_nopolyA.pdf",width=9)
+plot(w)
+dev.off()
+
+
+```
+
+#Figure 2c - Plot the expression of the top 5 tissue specific lncRNAs per cancer 
+
+```{r}
+#CHUNK-8: Plot the results from the tau score as a heatmap. Need to have run Chunk6. 
+#run the top 5-10 exp genes per cancer 
+
+#reduce to only the genes exp at threshold in at least one of the cancers:
+fpkm_tau = fpkm[rownames(fpkm)%in%exp_cutoff_genes$V1,]
+fpkm_tau = fpkm[rownames(fpkm)%in%rownames(tau_score_sig),]
+tau_score_sig$mean = rowMeans(fpkm_tau[rownames(tau_score_sig),])
+
+AML = fpkm_tau[,grep("TARGET.20",colnames(fpkm_tau))]
+ALL = fpkm_tau[,grep("TARGET.10",colnames(fpkm_tau))]
+TALL = ALL[,1:244]
+BALL = ALL[,245:434]
+NBL = fpkm_tau[,grep("TARGET.30",colnames(fpkm_tau))]
+WT = fpkm_tau[,grep("TARGET.50",colnames(fpkm_tau))]
+RT = fpkm_tau[,grep("TARGET.52",colnames(fpkm_tau))]
+
+fpkm_tau = cbind(AML,BALL,TALL,RT,WT,NBL)
+
+metaData = data.frame(colnames(fpkm_tau))
+metaData$Cancer = c(rep("AML",length(AML)),rep("BALL",length(BALL)),rep("TALL",length(TALL)),rep("RT",length(RT)),rep("WT",length(WT)),rep("NBL",length(NBL)))
+
+rownames(metaData) = metaData[,1]
+
+library(pheatmap)
+
+#top 10 lncRNAs per cancer based on expression with the highest tau score 
+tau_score_sig = tau_score_sig[order(tau_score_sig$Tissue_specific_index,decreasing=T),]
+tau_score_sig = tau_score_sig[order(tau_score_sig$mean,decreasing=T),]
+
+#protein
+tau_score_sig_lnc = tau_score_sig[grep("protein",tau_score_sig$gene_type_simple),]
+tau_score_sig_lnc = tau_score_sig[grep("lncRNA",tau_score_sig$gene_type_simple),]
+temp = by(tau_score_sig_lnc, tau_score_sig_lnc["Tissue_name"], head, n=5)
+
+fpkm_norm_lnc  = fpkm_tau[rownames(fpkm_tau)%in%c(rownames(temp$AML),rownames(temp$BALL),rownames(temp$TALL),rownames(temp$NBL),rownames(temp$WT),rownames(temp$RT)),]
+
+#cannot scale because gene expression because it is not gaussian distributed, however log transforming appears to normalize the data for many of the genes 
+
+fpkm_norm_lnc = as.data.frame(t(scale(t(log2(fpkm_norm_lnc+1)), center=T, scale=F)))
+
+df =data.frame(metaData)
+rownames(df) = as.character(df[,1])
+df = df[colnames(fpkm_norm_lnc),]
+df[,1] = NULL
+#df = df[order(df$Cancer),]
+
+genes_df = tau_score[rownames(tau_score)%in%rownames(fpkm_norm_lnc),]
+genes_df =genes_df[rownames(fpkm_norm_lnc),]
+genes_df = data.frame(genes_df[,1])
+genes_df[,1] = as.numeric(as.character(genes_df[,1]))
+colnames(genes_df) = "Tissue score"
+rownames(genes_df) = rownames(fpkm_norm_lnc)
+  
+colors = colorRampPalette(c("green","black", "red"), space="rgb")(64)
+annocolor = list(Type = c(Blood = "pink", Solid="blue"))
+
+
+rownames(fpkm_norm_lnc) = genes_anno[rownames(fpkm_norm_lnc),4]
+pdf("../Results/Tissue_Specific_Score_PanTarget_Protein_Heatmap_040120_TopGenes.pdf",width=9)
+aa = pheatmap(fpkm_norm_lnc,cluster_rows=TRUE, show_colnames= F,show_rownames=T,cluster_cols=T,border_color = FALSE,annotation_col = df,color=colors,annotation_colors = annocolor,cutree_rows = 3,cutree_cols = 2)
+aa
+dev.off()
+
+```
+
+#SUPPLEMENTARY FIGURES:
+
+#Supplementary Figure 2a-b - PCA of protein coding and lncRNA expression across cancers 
+
+```{r}
+#Plot the pan-cancer PCA for a) proteins only b) lncRNAs only 
+
+library(ggplot2)
+library(ggfortify)
+
+fpkm_pcg_lnc = fpkm[rownames(fpkm)%in%c(rownames(protein),rownames(noncoding)),]
+
+#only inlcude actually expressed genes:
+fpkm_pcg_lnc = fpkm_pcg_lnc[rownames(fpkm_pcg_lnc)%in%exp_cutoff_genes$V1,]
+
+log.ir = log2(fpkm_pcg_lnc+1)
+ir.pca = prcomp(t(log.ir),center=T)
+eigs <- ir.pca$sdev^2
+
+metaData = data.frame(colnames(fpkm_pcg_lnc))
+colnames(metaData) = "Samples"
+rownames(metaData) = metaData$Samples
+metaData$Type = "None"
+metaData$Cancer = "None"
+metaData[grep("TARGET.20",metaData$Samples),]$Cancer = "AML"
+metaData[grep("TARGET.30",metaData$Samples),]$Cancer = "NBL"
+metaData[grep("TARGET.50",metaData$Samples),]$Cancer = "WT"
+metaData[grep("TARGET.52",metaData$Samples),]$Cancer = "RT"
+metaData$Samples = gsub("-","\\.",metaData$Samples)
+metaData[metaData$Samples%in%colnames(TALL),]$Cancer = "TALL"
+metaData[metaData$Samples%in%colnames(BALL),]$Cancer = "BALL"
+metaData[metaData$Cancer%in%c("AML","BALL","TALL"),]$Type = "Blood"
+metaData[!(metaData$Cancer%in%c("AML","BALL","TALL")),]$Type = "Solid"
+
+ir.type = metaData$Type
+ir.cancer = metaData$Cancer
+
+qq = ggplot(ir.pca, aes(PC1, PC2, color=ir.cancer))+geom_point(size=2)+xlab(paste("\nPC1(",round(eigs[1] *100/ sum(eigs),2),"% ) ",sep=""))+ylab(paste("PC2(",round(eigs[2] *100/ sum(eigs),2),"% )\n",sep=""))+scale_fill_discrete(name="Tumor Type")
+qq = qq+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+  panel.background = element_blank(), axis.line = element_line(colour = "black"))
+qq =qq+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))
+#qq
+
+png("All_Genes_PanTarget_PCA_112119.png")
+plot(qq)
+dev.off()
+
+pdf("All_Genes_PanTarget_PCA_112119.pdf")
+plot(qq)
+dev.off()
+
+qq = ggplot(ir.pca, aes(PC1, PC2, color=ir.type))+geom_point(size=2)+xlab(paste("\nPC1(",round(eigs[1] *100/ sum(eigs),2),"% ) ",sep=""))+ylab(paste("PC2(",round(eigs[2] *100/ sum(eigs),2),"% )\n",sep=""))+scale_fill_discrete(name="Tumor Type")
+qq = qq+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+  panel.background = element_blank(), axis.line = element_line(colour = "black"))
+qq =qq+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))
+#qq
+
+png("All_Genes_BloodvsSolid_PanTarget_PCA_112119.png")
+plot(qq)
+dev.off()
+
+pdf("All_Genes_BloodvsSolid_PanTarget_PCA_112119.pdf")
+plot(qq)
+dev.off()
+
+#only protein coding 
+
+fpkm_pcg = fpkm_pcg_lnc[rownames(fpkm_pcg_lnc)%in%rownames(protein),]
+
+log.ir = log2(fpkm_pcg+1)
+ir.pca = prcomp(t(log.ir),center=T)
+eigs <- ir.pca$sdev^2
+
+qq = ggplot(ir.pca, aes(PC1, PC2, color=ir.cancer))+geom_point(size=2)+xlab(paste("\nPC1(",round(eigs[1] *100/ sum(eigs),2),"% ) ",sep=""))+ylab(paste("PC2(",round(eigs[2] *100/ sum(eigs),2),"% )\n",sep=""))+scale_fill_discrete(name="Tumor Type")
+qq = qq+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+  panel.background = element_blank(), axis.line = element_line(colour = "black"))
+qq =qq+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))
+qq
+
+png("Protein_Genes_PanTarget_PCA_112119.png")
+plot(qq)
+dev.off()
+
+pdf("Protein_Genes_PanTarget_PCA_112119.pdf")
+plot(qq)
+dev.off()
+
+#only lncRNA
+
+fpkm_lnc = fpkm_pcg_lnc[rownames(fpkm_pcg_lnc)%in%rownames(noncoding),]
+
+ir.cancer = metaData$Cancer
+log.ir = fpkm_lnc
+log.ir = log2(fpkm_lnc+1)
+ir.pca = prcomp(t(log.ir),center=T)
+eigs <- ir.pca$sdev^2
+
+
+qq = ggplot(ir.pca, aes(PC2, PC3, color=ir.cancer))+geom_point(size=2)+xlab(paste("\nPC2(",round(eigs[1] *100/ sum(eigs),2),"% ) ",sep=""))+ylab(paste("PC3(",round(eigs[2] *100/ sum(eigs),2),"% )\n",sep=""))+scale_fill_discrete(name="Tumor Type")
+qq = qq+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+  panel.background = element_blank(), axis.line = element_line(colour = "black"))
+qq =qq+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))
+qq
+
+png("lncRNA_Genes_PanTarget_PCA12_112119.png")
+plot(qq)
+dev.off()
+
+pdf("lncRNA_Genes_PanTarget_PCA12_112119.pdf")
+plot(qq)
+dev.off()
+
+```
+
+#Supplementary Figure 2c - Mean expression and tau score of gene types 
+
+```{r}
+# plot mean expression across all cancers vs gene type - supplementary
+
+mean_genes = data.frame(rowMeans(fpkm[rownames(tau_score),]))
+mean_genes$tau_score= tau_score$Tissue_specific_index
+mean_genes$gene_types = tau_score$gene_type_simple
+
+mean_genes$gene_types = factor(mean_genes$gene_types,levels=c("protein","lncRNA","novel_lncRNA"))
+
+gg = ggplot(mean_genes,aes(mean_genes$gene_types,mean_genes[,1],fill=mean_genes$gene_types))+geom_boxplot()+scale_y_log10()+xlab("")+ylab("log10(FPKM)\n")
+gg = gg+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+gg =gg+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"),legend.position = "none")
+gg
+
+pdf("../Results/PanTarget_Tau_GeneType_Avg_Exp_040120.pdf")
+plot(gg)
+dev.off()
+
+```
+
+#Supplementary Figure 2d-e - Expression of C17orf76-AS1 and MEG3 across all cancers
+
+```{r}
+#This function will allow you to plot the expression of any gene and have a graph created as output: 
+
+library(ggplot2)
+library(ggpubr)
+
+fpkm_plot = fpkm[rownames(fpkm)%in%exp_cutoff_genes$V1,]
+
+AML = fpkm_plot[,grep("TARGET.20",colnames(fpkm_plot))]
+ALL = fpkm_plot[,grep("TARGET.10",colnames(fpkm_plot))]
+TALL = ALL[,1:244]
+BALL = ALL[,245:434]
+NBL = fpkm_plot[,grep("TARGET.30",colnames(fpkm_plot))]
+WT = fpkm_plot[,grep("TARGET.50",colnames(fpkm_plot))]
+RT = fpkm_plot[,grep("TARGET.52",colnames(fpkm_plot))]
+
+#function starts here 
+plot_gene_exp <- function(gene){
+ 
+  fpkm_onegene = data.frame(t(fpkm[gene,]))
+  fpkm_onegene$cancer = "None"
+  #rownames(fpkm_onegene) = gsub("-","\\.",rownames(fpkm_onegene))
+  fpkm_onegene[colnames(NBL),]$cancer = "NBL"
+  fpkm_onegene[colnames(AML),]$cancer = "AML"
+  fpkm_onegene[colnames(BALL),]$cancer = "BALL"
+  fpkm_onegene[colnames(TALL),]$cancer = "TALL"
+  fpkm_onegene[colnames(WT),]$cancer = "WT"
+  fpkm_onegene[colnames(RT),]$cancer = "RT"
+  fpkm_onegene = fpkm_onegene[fpkm_onegene$cancer!="None",]
+  
+  fpkm_onegene$cancer = factor(fpkm_onegene$cancer,levels=c("AML","BALL","TALL","WT","RT","NBL"))
+  
+  # aa= ggplot(fpkm_onegene,aes(x=fpkm_onegene$cancer,y=fpkm_onegene[,1]+1,fill=fpkm_onegene$cancer)) + geom_boxplot()+xlab("")+ylab("log10(FPKM + 1)\n")+ggtitle(genes_anno[gene,4])+scale_fill_discrete(name="Cancer")+scale_y_log10()
+  # aa = aa+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+  # panel.background = element_blank(), axis.line = element_line(colour = "black"))
+  # aa =aa+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))
+  # aa
+  
+ aa= ggplot(fpkm_onegene,aes(x=cancer,y=fpkm_onegene[,1],fill=cancer)) + geom_boxplot()+xlab("")+ylab("FPKM\n")+ggtitle(genes_anno[gene,4])+scale_fill_discrete(name="Cancer")
+ aa = aa+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+ panel.background = element_blank(), axis.line = element_line(colour = "black"))
+ aa =aa+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"),legend.position = "none")
+ print(aa)
+  
+  #png(paste(genes_anno[gene,4],"PanTarget_Expression_82019.png",sep="_"),width = 550, height = 480)
+  #plot(aa)
+  #dev.off()
+  
+  pdf(paste(genes_anno[gene,4],"PanTarget_Expression.pdf",sep="_"),width=8)
+  plot(aa)
+  dev.off()
+}
+
+
+#plot the expression of individual genes. First get the gencode gene name and then run function with that name as input. 
+
+genes = genes_anno[genes_anno$V4=="C17orf76-AS1",1]
+genes = genes_anno[genes_anno$V4=="MEG3",1]
+
+plot_gene_exp(genes)
+
+
+```
+
+##### Supplementary Figure 2f-g - Tau score analysis and heatmap in TCGA cancers 
+
+#Compare tissue specific lncRNAs between TCGA and TARGET
+
+#TCGA Official
+
+```{r}
+
+#load both the annotation data and the fpkm matrices per TCGA cancer 
+
+tcga_genes  = read.table("../Data/TCGA_Proccessed_RNA_seq/gencode_v22_genes.txt")
+tcga_genes$simple_type ="other"
+tcga_genes[grep("protein",tcga_genes$V2),]$simple_type = "protein_coding"
+tcga_genes[grep("lincRNA|antisense|processed_transcript|sense|bidirectional|prime",tcga_genes$V2),]$simple_type = "lncRNA"
+
+uterine = read.csv("../Data/TCGA_Proccessed_RNA_seq/TCGA_UCEC_RNASeq_ExpSummary.csv")
+uterine$tissue = "UCEC"
+rownames(uterine) = uterine$gene
+uterine_lnc = uterine[uterine$gene%in%tcga_genes[tcga_genes$simple_type=="lncRNA",1],] 
+
+liver = read.csv("../Data/TCGA_Proccessed_RNA_seq/TCGA_LIHC_RNASeq_ExpSummary.csv")
+liver$tissue =  "LIHC"
+rownames(liver) = liver$gene
+liver_lnc = liver[liver$gene%in%tcga_genes[tcga_genes$simple_type=="lncRNA",1],] 
+
+
+kidney = read.csv("../Data/TCGA_Proccessed_RNA_seq/TCGA_KIRC_RNASeq_ExpSummary.csv")
+kidney$tissue = "KIRC"
+rownames(kidney) = kidney$gene
+kidney_lnc = kidney[kidney$gene%in%tcga_genes[tcga_genes$simple_type=="lncRNA",1],] 
+
+
+bladder = read.csv("../Data/TCGA_Proccessed_RNA_seq/TCGA_BLCA_RNASeq_ExpSummary.csv")
+bladder$tissue = "BLCA"
+rownames(bladder) = bladder$gene
+bladder_lnc = bladder[bladder$gene%in%tcga_genes[tcga_genes$simple_type=="lncRNA",1],] 
+
+ovarian = read.csv("../Data/TCGA_Proccessed_RNA_seq/TCGA_OV_RNASeq_ExpSummary.csv")
+ovarian$tissue = "OV"
+rownames(ovarian) = ovarian$gene
+ovarian_lnc = ovarian[ovarian$gene%in%tcga_genes[tcga_genes$simple_type=="lncRNA",1],] 
+
+
+sarcoma = read.csv("../Data/TCGA_Proccessed_RNA_seq/TCGA_SARC_RNASeq_ExpSummary.csv")
+sarcoma$tissue = "SARC"
+rownames(sarcoma) = sarcoma$gene
+sarcoma_lnc = sarcoma[sarcoma$gene%in%tcga_genes[tcga_genes$simple_type=="lncRNA",1],] 
+
+
+brain = read.csv("../Data/TCGA_Proccessed_RNA_seq/TCGA_GBM_RNASeq_ExpSummary.csv")
+brain$tissue = "GBM"
+rownames(brain) = brain$gene
+brain_lnc = brain[brain$gene%in%tcga_genes[tcga_genes$simple_type=="lncRNA",1],] 
+
+
+testis = read.csv("../Data/TCGA_Proccessed_RNA_seq/TCGA_TGCT_RNASeq_ExpSummary.csv")
+testis$tissue = "TGCT"
+rownames(testis) = testis$gene
+testis_lnc = testis[testis$gene%in%tcga_genes[tcga_genes$simple_type=="lncRNA",1],] 
+
+
+kidney2 = read.csv("../Data/TCGA_Proccessed_RNA_seq/TCGA_KIRP_RNASeq_ExpSummary.csv")
+kidney2$tissue = "KIRP"
+rownames(kidney2) = kidney2$gene
+kidney2_lnc = kidney2[kidney2$gene%in%tcga_genes[tcga_genes$simple_type=="lncRNA",1],] 
+
+
+pancreas = read.csv("../Data/TCGA_Proccessed_RNA_seq/TCGA_PAAD_RNASeq_ExpSummary.csv")
+pancreas$tissue = "PAAD"
+rownames(pancreas) = pancreas$gene
+pancreas_lnc = pancreas[pancreas$gene%in%tcga_genes[tcga_genes$simple_type=="lncRNA",1],] 
+
+
+gangli = read.csv("../Data/TCGA_Proccessed_RNA_seq/TCGA_PCPG_RNASeq_ExpSummary.csv")
+gangli$tissue = "PCPG"
+rownames(gangli) = gangli$gene
+gangli_lnc = gangli[gangli$gene%in%tcga_genes[tcga_genes$simple_type=="lncRNA",1],] 
+
+
+thyroid = read.csv("../Data/TCGA_Proccessed_RNA_seq/TCGA_THCA_RNASeq_ExpSummary.csv")
+thyroid$tissue = "THCA"
+rownames(thyroid) = thyroid$gene
+thyroid_lnc = thyroid[thyroid$gene%in%tcga_genes[tcga_genes$simple_type=="lncRNA",1],] 
+
+#first calculate the number of expressed genes per cancer - same FPKM > 1 for 20% percentile threshold 
+
+#calculate tau score 
+
+temp = data.frame(cbind(bladder$mean,brain$mean,gangli$mean,kidney$mean,kidney2$mean,liver$mean,ovarian$mean,pancreas$mean,sarcoma$mean,testis$mean,thyroid$mean,uterine$mean))
+rownames(temp) = uterine$gene
+temp$sum = rowSums(temp)
+temp = temp[temp$sum>0,]
+
+tcga_tau = cbind(bladder$mean,brain$mean,gangli$mean,kidney$mean,kidney2$mean,liver$mean,ovarian$mean,pancreas$mean,sarcoma$mean,testis$mean,thyroid$mean,uterine$mean)
+colnames(tcga_tau) = c("bladder","brain","gangli","kidney","kidney2","liver","ovarian","pancreas","sarcoma","testis","thyroid","uterine")
+rownames(tcga_tau) = uterine$gene
+tcga_tau = tcga_tau[rownames(tcga_tau)%in%rownames(temp),]
+
+
+a1 <- tcga_tau    # expression matrix
+m <- 11          # No of tissues - 1
+
+a1 <- round(a1,3)
+dim1 <- dim(a1)[1]
+
+s <- matrix(0,nrow=dim(a1)[1],ncol=2, dimnames = list(rownames(a1), c("Tissue_specific_index","Tissue_name")))
+
+for(ii in 1:dim1){
+  #break
+  print(ii)
+  
+  temp =tcga_tau[ii,]
+  xhat = (temp)/max(temp)
+  s[ii,1] <- sum(1-xhat)/m
+  s[ii,2] <- names(temp[temp==max(temp)])
+}
+s_ori = s
+s = data.frame(s)
+
+#write.table(s, file="TCGA_Tau_Score.txt",row.names=TRUE, sep="\t", quote= FALSE)
+
+tcga_tau_score = s
+
+tcga_tau_score$Tissue_specific_index = as.numeric(as.character(tcga_tau_score$Tissue_specific_index))
+
+#label name
+rownames(tcga_genes) = tcga_genes$V1
+tcga_tau_score$name = tcga_genes[rownames(tcga_tau_score),3]
+
+tcga_tau_score$gene = rownames(tcga_tau_score)
+
+tcga_tau_score$gene_type = tcga_genes[rownames(tcga_tau_score),]$simple_type
+
+ggplot(tcga_tau_score,aes(Tissue_specific_index,color=gene_type))+geom_density()
+
+tcga_tau_score_sig = tcga_tau_score[tcga_tau_score$Tissue_specific_index>0.8,]
+
+
+tcga_tau_score_sig_lnc = tcga_tau_score_sig[rownames(tcga_tau_score_sig)%in%ovarian_lnc$gene,]
+
+
+tcga_tau_score_sig_prot = tcga_tau_score_sig[rownames(tcga_tau_score_sig)%in%tcga_genes[tcga_genes$simple_type=="protein_coding",1],]
+
+
+#subset based on only highly expressed genes
+all_tcga_lncs = c(as.character(bladder_lnc[bladder_lnc$quant80>1,]$gene),as.character(brain_lnc[brain_lnc$quant80>1,]$gene),as.character(gangli_lnc[gangli_lnc$quant80>1,]$gene),as.character(kidney_lnc[kidney_lnc$quant80>1,]$gene),as.character(kidney2_lnc[kidney2_lnc$quant80>1,]$gene),as.character(liver_lnc[liver_lnc$quant80>1,]$gene),as.character(ovarian_lnc[ovarian_lnc$quant80>1,]$gene),as.character(pancreas_lnc[pancreas_lnc$quant80>1,]$gene),as.character(sarcoma_lnc[sarcoma_lnc$quant80>1,]$gene),as.character(testis_lnc[testis_lnc$quant80>1,]$gene),as.character(thyroid_lnc[thyroid_lnc$quant80>1,]$gene),as.character(uterine_lnc[uterine_lnc$quant80>1,]$gene))
+
+tissue = c(as.character(bladder_lnc[bladder_lnc$quant80>1,]$tissue),as.character(brain_lnc[brain_lnc$quant80>1,]$tissue),as.character(gangli_lnc[gangli_lnc$quant80>1,]$tissue),as.character(kidney_lnc[kidney_lnc$quant80>1,]$tissue),as.character(kidney2_lnc[kidney2_lnc$quant80>1,]$tissue),as.character(liver_lnc[liver_lnc$quant80>1,]$tissue),as.character(ovarian_lnc[ovarian_lnc$quant80>1,]$tissue),as.character(pancreas_lnc[pancreas_lnc$quant80>1,]$tissue),as.character(sarcoma_lnc[sarcoma_lnc$quant80>1,]$tissue),as.character(testis_lnc[testis_lnc$quant80>1,]$tissue),as.character(thyroid_lnc[thyroid_lnc$quant80>1,]$tissue),as.character(uterine_lnc[uterine_lnc$quant80>1,]$tissue))
+
+all_tcga_lncs_exp =data.frame(cbind(all_tcga_lncs,tissue))
+
+all_tcga_lncs = all_tcga_lncs[!duplicated(all_tcga_lncs)]
+
+tcga_tau_score_sig_lnc = tcga_tau_score_sig_lnc[rownames(tcga_tau_score_sig_lnc)%in%all_tcga_lncs,]
+
+tcga_tau_score_sig_lnc$short = uterine[rownames(tcga_tau_score_sig_lnc),]$short
+
+sort(table(as.character(tcga_tau_score_sig_lnc$Tissue_name)))
+
+tcga_tau_score_sig_lnc_plot = data.frame(sort(table(as.character(tcga_tau_score_sig_lnc$Tissue_name))))
+
+
+tcga_tau_score_sig_lnc_plot$tcga = c("UCEC: uterine","PAAD:pancreas","BLCA:bladder","KIRP:kidney-papillary cell","TCHA:thyroid","KIRC:renal_cell","OV:ovarian","SARC:sarcoma","LIHC:liver","PCPG:paraganglioma","GBM:brain","TGCT:testis")
+
+#SUPPLEMENTARY FIGURE 2F HERE 
+
+tcga_tau_score_sig_lnc_plot$tcga = factor(tcga_tau_score_sig_lnc_plot$tcga,levels=tcga_tau_score_sig_lnc_plot$tcga)
+
+x = ggplot(tcga_tau_score_sig_lnc_plot,aes(x=tcga,y=Freq)) + geom_bar(stat="identity") +xlab("") + ylab("Tissue specific genes (t > 0.8) \n")
+#changes background panel
+x = x+theme_classic()+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+#change fonts and colors of the axes
+x =x+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"),axis.text.x = element_text(angle=75,hjust=1))
+x
+
+pdf("TCGA_TS_lncRNAs.pdf",width=12,height = 12)
+x
+dev.off()
+
+tcga_tau_score_sig_lnc_plot = data.frame(sort(table(as.character(tcga_tau_score_sig_lnc_small$Tissue_name))))
+
+```
+
+```{r}
+
+#SUPPLEMENTARY FIGURE 2G HERE 
+
+library(pheatmap)
+
+#top 5 lncRNA analysis for TCGA
+
+tcga_genes  = read.table("~/Data/TCGA_Proccessed_RNA_seq/gencode_v22_genes.txt")
+tcga_genes$simple_type ="other"
+tcga_genes[grep("protein",tcga_genes$V2),]$simple_type = "protein_coding"
+tcga_genes[grep("lincRNA|antisense|processed_transcript|sense|bidirectional|prime",tcga_genes$V2),]$simple_type = "lncRNA"
+rownames(tcga_genes) = tcga_genes$V1
+  
+bladder5 = read.csv("~/Data/TCGA_Proccessed_RNA_seq/TCGA_BLCA_RNASeq_TSTop5.csv")
+rownames(bladder5) = bladder5$gene
+bladder5$gene = NULL
+
+brain5 = read.csv("~/Data/TCGA_Proccessed_RNA_seq/TCGA_GBM_RNASeq_TSTop5.csv")
+rownames(brain5) = brain5$gene
+brain5$gene = NULL
+
+liver5 = read.csv("~/Data/TCGA_Proccessed_RNA_seq/TCGA_LIHC_RNASeq_TSTop5.csv")
+rownames(liver5) = liver5$gene
+liver5$gene = NULL
+
+gangli5 = read.csv("~/Data/TCGA_Proccessed_RNA_seq/TCGA_PCPG_RNASeq_TSTop5.csv")
+rownames(gangli5) = gangli5$gene
+gangli5$gene = NULL
+
+kidney5 = read.csv("~/Data/TCGA_Proccessed_RNA_seq/TCGA_KIRC_RNASeq_TSTop5.csv")
+rownames(kidney5) = kidney5$X
+kidney5$X = NULL
+
+kidney25 = read.csv("~/Data/TCGA_Proccessed_RNA_seq/TCGA_KIRP_RNASeq_TSTop5.csv")
+rownames(kidney25) = kidney25$gene
+kidney25$gene = NULL
+
+ovarian5 = read.csv("~/Data/TCGA_Proccessed_RNA_seq/TCGA_OV_RNASeq_TSTop5.csv",header=F,stringsAsFactors = F)
+ovarian5 = ovarian5[ovarian5$V1%in%rownames(kidney25),]
+rownames(ovarian5) = ovarian5$V1
+ovarian5$V1 = NULL
+ovarian5 = data.frame(data.matrix(ovarian5))
+colnames(ovarian5) = paste("ov",colnames(ovarian5),sep="_")
+
+pancreas5 = read.csv("~/Data/TCGA_Proccessed_RNA_seq/TCGA_PAAD_RNASeq_TSTop5.csv")
+rownames(pancreas5) = pancreas5$gene
+pancreas5$gene = NULL
+
+sarcoma5 = read.csv("~/Data/TCGA_Proccessed_RNA_seq/TCGA_SARC_RNASeq_TSTop5.csv")
+rownames(sarcoma5) = sarcoma5$gene
+sarcoma5$gene = NULL
+
+testis5 = read.csv("~/Data/TCGA_Proccessed_RNA_seq/TCGA_TGCT_RNASeq_TSTop5.csv",header=F,stringsAsFactors = F)
+testis5 = testis5[testis5$V1%in%rownames(kidney25),]
+rownames(testis5) = testis5$V1
+testis5$V1 = NULL
+testis5 = data.frame(data.matrix(testis5))
+colnames(testis5) = paste("testis",colnames(testis5),sep="_")
+
+thyroid5 = read.csv("~/Data/TCGA_Proccessed_RNA_seq/TCGA_THCA_RNASeq_TSTop5.csv")
+rownames(thyroid5) = thyroid5$gene
+thyroid5$gene = NULL
+
+uterine5 = read.csv("~/Data/TCGA_Proccessed_RNA_seq/TCGA_UCEC_RNASeq_TSTop5.csv")
+rownames(uterine5) = uterine5$gene
+uterine5$gene = NULL
+
+fpkm_tcga = data.frame(cbind(bladder5,brain5,gangli5,kidney5,kidney25,liver5,ovarian5,pancreas5,sarcoma5,thyroid5,uterine5,testis5))
+
+fpkm_norm = as.data.frame(t(scale(t(log2(fpkm_tcga+1)), center=T, scale=F)))
+
+
+metaData = data.frame(colnames(fpkm_tcga))
+metaData$Cancer = c(rep("BLCA",length(bladder5)),rep("GBM",length(brain5)),rep("PCPG",length(gangli5)),rep("KIRC",length(kidney5)),rep("KIRP",length(kidney25)),rep("LIHC",length(liver5)),rep("OV",length(ovarian5)),rep("PAAD",length(pancreas5)),rep("SARC",length(sarcoma5)),rep("THCA",length(thyroid5)),rep("UCEC",length(uterine5)),rep("TGCT",length(testis5)))
+
+df =data.frame(metaData)
+rownames(df) = as.character(df[,1])
+df = df[colnames(fpkm_norm),]
+df[,1] = NULL
+#df = df[order(df$Cancer),]
+
+rownames(fpkm_norm) = tcga_genes[rownames(fpkm_tcga),]$V3
+
+colors = colorRampPalette(c("green","black", "red"), space="rgb")(64)
+
+aa = pheatmap(fpkm_norm,cluster_rows=T, show_colnames= F,show_rownames=F,cluster_cols=T,border_color = FALSE,annotation_col = df,color=colors)
+
+pdf("TCGA_Top5_TSlncRNAs.pdf",width=13)
+aa
+dev.off() 
+
+```
+
+
+#Supplementary Table 6 - TARGET NBL Tau score purity analysis: 
+
+```{r}
+#Tumor purity impact
+est_score = read.table("../Data/TARGET/TARGET_NBL_FPKM_Estimate_Score.txt", sep="\t", header=T, check.names=F,skip =2)
+rownames(est_score) = est_score$Description
+est_score = est_score[,3:163]
+est_score = data.frame(t(est_score))
+
+#based on ESTIMATE vignette purity to score graph 
+nbl_impure = rownames(est_score[est_score$ESTIMATEScore>50,]) # 80% purity 
+nbl_impure = rownames(est_score[est_score$ESTIMATEScore>-1000,]) # 90% purity 
+
+nbl_impure = rownames(est_score[est_score$ESTIMATEScore>-3000,]) # 80% purity 
+
+NBL= fpkm[,grep("TARGET.30",colnames(fpkm))]
+NBL = NBL[,!(colnames(NBL)%in%nbl_impure)]
+quant = apply(NBL,1,function(x) quantile(x,c(.8))) #103 samples left-80%; 67 - 90%
+quant_plot= data.frame(quant)
+quant_plot$type = "other"
+quant_plot[rownames(quant_plot)%in%rownames(protein),]$type  = "protein"
+quant_plot[rownames(quant_plot)%in%rownames(noncoding),]$type  = "lncRNA"
+quant_plot= rbind(quant_plot,cbind(quant,type="all"))
+
+ggplot(quant_plot,aes(as.numeric(quant_plot[,1]),color=type))+geom_density()+scale_x_log10()+geom_vline(xintercept =1)
+
+quant_plot = quant_plot[quant_plot$type!="other",]
+
+#shows same thing if you kept the 0's in - inlfection point around 0.33 - which is fpkm~1
+ggplot(quant_plot,aes(log10(quant_plot[,1]+1)))+geom_density()+geom_vline(xintercept =0.25)
+
+NBL= NBL[quant>0.3,]
+
+#Now calculate the tau score replacing TARGET NBL with NBL Pure samples 
+
+all_genes_cancer2 = all_genes_cancer[all_genes_cancer$X2!="NBL",]
+all_genes_cancer2= rbind(all_genes_cancer2,data.frame(cbind(rownames(NBL),"NBL")))
+exp_cutoff_genes = names(table(as.character(all_genes_cancer2$X1)))
+exp_cutoff_genes = genes_anno[genes_anno$V1%in%exp_cutoff_genes,]
+
+fpkm_tau = fpkm[rownames(fpkm)%in%c(exp_cutoff_genes$V1),]
+
+AML = rowMeans(fpkm_tau[,grep("TARGET.20",colnames(fpkm_tau))])
+ALL = fpkm_tau[,grep("TARGET.10",colnames(fpkm_tau))]
+TALL = rowMeans(ALL[,1:244])
+BALL = rowMeans(ALL[,245:434])
+WT = rowMeans(fpkm_tau[,grep("TARGET.50",colnames(fpkm_tau))])
+RT = rowMeans(fpkm_tau[,grep("TARGET.52",colnames(fpkm_tau))])
+NBL = fpkm_tau[,grep("TARGET.30",colnames(fpkm_tau))]
+NBL = rowMeans(NBL[,!(colnames(NBL)%in%nbl_impure)])
+
+fpkm_tau = cbind(AML,BALL,TALL,RT,WT,NBL)
+fpkm_tau = fpkm_tau[rowSums(fpkm_tau)>0,]
+
+a1 <- fpkm_tau            # expression matrix
+m <- 5             # No of tissues - 1
+
+#rownames(a1) <- a[,1]
+#a1 <- a1[,-1]
+
+a1 <- round(a1,3)
+dim1 <- dim(a1)[1]
+
+s <- matrix(0,nrow=dim(a1)[1],ncol=2, dimnames = list(rownames(a1), c("Tissue_specific_index","Tissue_name")))
+
+for(ii in 1:dim1){
+  #break
+  print(ii)
+  
+  temp =fpkm_tau[ii,]
+  xhat = (temp)/max(temp)
+  s[ii,1] <- sum(1-xhat)/m
+  s[ii,2] <- names(temp[temp==max(temp)])
+}
+s_ori = s
+s = data.frame(s)
+
+#write.table(s, file="PanTARGET_AllGenes_TissueSpecificScore_Pure.txt",row.names=TRUE, sep="\t", quote= FALSE)
+
+tau_score = s
+
+tau_score = tau_score[rownames(tau_score)%in%rownames(genes_anno),]
+
+length(exp_cutoff_genes[!(exp_cutoff_genes$V1%in%rownames(tau_score)),1])
+
+tau_score$gene_name = genes_anno[rownames(tau_score),4]
+tau_score$gene_type = genes_anno[rownames(tau_score),3]
+tau_score$gene_type_simple =as.character(tau_score$gene_type)
+tau_score[grep("protein",tau_score$gene_type),5] = "protein"
+tau_score[grep("lncRNA|noncoding",tau_score$gene_type),5] = "lncRNA"
+tau_score[grep("MSTRG_Non_coding_lncRNA|novel_gene_coding_or_noncoding",tau_score$gene_type),5] = "novel_lncRNA"
+tau_score[grep("lnc-",tau_score$gene_name),5] = "novel_lncRNA"
+tau_score = tau_score[grep("protein|lncRNA|novel_lncRNA",tau_score$gene_type_simple),]
+
+tau_score =tau_score[rownames(tau_score)%in%exp_cutoff_genes$V1,]
+
+hela_polya = read.csv("../Data/polyA_Annotation/13059_2010_2480_MOESM6_ESM.csv",stringsAsFactors =F)
+h9_polya = read.csv("../Data/polyA_Annotation/13059_2010_2480_MOESM5_ESM.csv",stringsAsFactors =F)
+
+non_poly_genes_anno = genes_anno[genes_anno$V4%in%c(hela_polya$Gene,h9_polya$Gene),]
+
+tau_score$polyA = "yes"
+tau_score[rownames(tau_score)%in%non_poly_genes_anno$V1,]$polyA = "no"
+
+tau_score = tau_score[tau_score$polyA=="yes",]
+
+#Supplementary Table 6 Purity analysis here - run analysis twice with both 80 and 90% NBL datasets 
+sort(table(tau_score[(tau_score$gene_type_simple=="lncRNA" | tau_score$gene_type_simple=="novel_lncRNA") & as.numeric(as.character(tau_score$Tissue_specific_index))>0.8,]$Tissue_name))
+
+```
+
+
+#Supplementary Table 6 - GMKF NBL Tau score analysis: 
+
+```{r}
+
+#We need to first subset the GMKF samples to match TARGET: Stage 4 and 4s (n=87)
+
+library(dplyr)
+
+#load and process the expression matrix for GMKF Data 
+
+load("../Data/NBL_GMKF_stringtie_FPKM.rda")
+
+gmkf = samples
+rm(samples)
+gmkf$gene = trans_length[as.character(gmkf$transcript),]$Gene
+
+gmkf = gmkf[,!(colnames(gmkf)%in%c("chr","start","stop","transcript"))]
+
+gmkf_gene = gmkf%>%group_by(gene)%>% summarise_if(is.numeric, funs(sum))
+
+gmkf_gene  = as.data.frame(gmkf_gene)
+rownames(gmkf_gene) =gmkf_gene$gene
+gmkf_gene$gene = NULL
+
+gmkf_gene = gmkf_gene[,!(colnames(gmkf_gene)%in%c("GMKF.30.PAUPKS03.01B.99R.Aligned.txt"))]
+
+gmkf_gene = gmkf_gene[rownames(gmkf_gene)%in%genes_anno$V1,]
+
+gmkf_gene2_ori = gmkf_gene
+
+#load the clinical data describing disease stage per sample 
+
+clinical = read.csv("../Data/GMKF_Clin_all_samples_ZV.csv")
+head(clinical)
+
+temp_names = data.frame(colnames(gmkf_gene))
+temp_names$short = gsub("GMKF.30.","",temp_names[,1])
+temp_names$short = gsub(".01......Aligned.txt","",temp_names$short)
+temp_names$short = gsub(".01.....Aligned.txt","",temp_names$short)
+temp_names$short = gsub("03","",temp_names$short)
+
+clinical  = clinical[clinical$usi%in%temp_names$short,]
+
+#HIGH RISK ONLY
+#subset the gmkf samples based on Stage 4 and 4s to mirror the composition of TARGET
+gmkf_hr = clinical[clinical$inss_stage%in%c("Stage 4", "Stage 4s"),] #87 samples
+rownames(clinical) = clinical$usi
+
+#final expression matrix: 
+
+gmkf_gene_hr = gmkf_gene[,colnames(gmkf_gene)%in%temp_names[temp_names$short%in%gmkf_hr$usi,1]]
+quant = apply(gmkf_gene_hr,1,function(x) quantile(x,c(.80)))
+quant = quant[quant>1]
+gmkf_gene_hr = gmkf_gene_hr[names(quant),]
+
+gmkf_gene2_lnc = gmkf_gene_hr[rownames(gmkf_gene_hr)%in%noncoding[noncoding$conf=="high",1],] - #1690
+  
+gmkf_gene2_protein = gmkf_gene_hr[rownames(gmkf_gene_hr)%in%protein$V1,]   
+
+
+#Now calculate the tau score replacing TARGET NBL with GMKF NBL in the original analysis:
+
+all_genes_cancer2 = all_genes_cancer[all_genes_cancer$X2!="NBL",]
+all_genes_cancer2= rbind(all_genes_cancer2,data.frame(cbind(rownames(gmkf_gene_hr),"NBL")))
+exp_cutoff_genes = names(table(as.character(all_genes_cancer2$X1)))
+exp_cutoff_genes = genes_anno[genes_anno$V1%in%exp_cutoff_genes,]
+
+fpkm_tau = fpkm[rownames(fpkm)%in%c(exp_cutoff_genes$V1),]
+
+AML = rowMeans(fpkm_tau[,grep("TARGET.20",colnames(fpkm_tau))])
+ALL = fpkm_tau[,grep("TARGET.10",colnames(fpkm_tau))]
+TALL = rowMeans(ALL[,1:244])
+BALL = rowMeans(ALL[,245:434])
+WT = rowMeans(fpkm_tau[,grep("TARGET.50",colnames(fpkm_tau))])
+RT = rowMeans(fpkm_tau[,grep("TARGET.52",colnames(fpkm_tau))])
+
+
+# add GMKF HR
+gmkf_gene_hr = gmkf_gene[,colnames(gmkf_gene)%in%temp_names[temp_names$short%in%gmkf_hr$usi,1]]
+NBL = rowMeans(gmkf_gene_hr[rownames(gmkf_gene_hr)%in%exp_cutoff_genes$V1,])
+#make sure gene names are in same order as the other cancers have it 
+NBL = NBL[names(AML)]
+
+fpkm_tau = cbind(AML,BALL,TALL,RT,WT,NBL)
+fpkm_tau = fpkm_tau[rowSums(fpkm_tau)>0,]
+
+a1 <- fpkm_tau            # expression matrix
+m <- 5             # No of tissues - 1
+
+#rownames(a1) <- a[,1]
+#a1 <- a1[,-1]
+
+a1 <- round(a1,3)
+dim1 <- dim(a1)[1]
+
+s <- matrix(0,nrow=dim(a1)[1],ncol=2, dimnames = list(rownames(a1), c("Tissue_specific_index","Tissue_name")))
+
+for(ii in 1:dim1){
+  #break
+  print(ii)
+  
+  temp =fpkm_tau[ii,]
+  xhat = (temp)/max(temp)
+  s[ii,1] <- sum(1-xhat)/m
+  s[ii,2] <- names(temp[temp==max(temp)])
+}
+s_ori = s
+s = data.frame(s)
+
+#write.table(s, file="PanTARGET_AllGenes_TissueSpecificScore_GMKF_HR.txt",row.names=TRUE, sep="\t", quote= FALSE)
+
+tau_score = s
+
+tau_score = tau_score[rownames(tau_score)%in%rownames(genes_anno),]
+
+length(exp_cutoff_genes[!(exp_cutoff_genes$V1%in%rownames(tau_score)),1])
+
+tau_score$gene_name = genes_anno[rownames(tau_score),4]
+tau_score$gene_type = genes_anno[rownames(tau_score),3]
+tau_score$gene_type_simple =as.character(tau_score$gene_type)
+tau_score[grep("protein",tau_score$gene_type),5] = "protein"
+tau_score[grep("lncRNA|noncoding",tau_score$gene_type),5] = "lncRNA"
+tau_score[grep("MSTRG_Non_coding_lncRNA|novel_gene_coding_or_noncoding",tau_score$gene_type),5] = "novel_lncRNA"
+tau_score[grep("lnc-",tau_score$gene_name),5] = "novel_lncRNA"
+tau_score = tau_score[grep("protein|lncRNA|novel_lncRNA",tau_score$gene_type_simple),]
+
+tau_score =tau_score[rownames(tau_score)%in%exp_cutoff_genes$V1,]
+
+hela_polya = read.csv("../Data/polyA_Annotation/13059_2010_2480_MOESM6_ESM.csv",stringsAsFactors =F)
+h9_polya = read.csv("../Data/polyA_Annotation/13059_2010_2480_MOESM5_ESM.csv",stringsAsFactors =F)
+
+non_poly_genes_anno = genes_anno[genes_anno$V4%in%c(hela_polya$Gene,h9_polya$Gene),]
+
+tau_score$polyA = "yes"
+tau_score[rownames(tau_score)%in%non_poly_genes_anno$V1,]$polyA = "no"
+
+tau_score = tau_score[tau_score$polyA=="yes",]
+
+
+#Supplementary Table 6 GMKF analysis here: 
+sort(table(tau_score[(tau_score$gene_type_simple=="lncRNA" | tau_score$gene_type_simple=="novel_lncRNA") & as.numeric(as.character(tau_score$Tissue_specific_index))>0.8,]$Tissue_name))
+
+
+```
+
+
+```
+

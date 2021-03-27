@@ -1,0 +1,802 @@
+---
+title: "Figure 3 and Supplementary Figure 3 - CNV analysis only"
+output: html_notebook
+---
+
+#Gene annotation and expression matrix data: 
+
+```{r}
+
+#loads the gene annotation files used in this study
+
+#genes_anno - all genes considered and their position, gene type, locus etc - Data associated with Supplementary Table 2
+#protein,non_coding - subset of genes_anno based on gene_type
+#all_genes_cancer,exp_cutoff_genes - gene annotation for genes that pass filtering threshold (at least 1 FPKM in 20% of samples)
+
+load("../Data/TARGET/PanCancer_lncRNA_AnnotationFiles_030121.rda")
+
+
+#loads the expression matrix (fpkm) for all samples used in this study 
+
+#fpkm - total expression matrix of all samples and alll genes 
+#fpkm_list - list of dataframes with each cancer gene exp matrix after filtering out low exp genes
+
+load("../Data/TARGET/PanCancer_lncRNA_ExpFiles_030121.rda")
+
+```
+
+# A note about how CNV was called from segmentation files. 
+
+GISTIC was run on segmentation files provided in CNV_SV_Data folder using the following parameters. 
+
+echo 'echo '/home/modia/Apexa/resources/GISTIC_2_0_23/gistic2 -b ./ -seg NBL_pantarget.seg -refgene /mnt/isilon/diskin_lab/Apexa/hg19.mat -genegistic 1 -smallmem 1 -broad 1 -twoside 1 -conf 0.90 -armpeel 1 -savegene 1 -gcm extreme -js 2 -rx 0' | qsub -cwd -l mem_free=15G -l m_mem_free=15G -l h_vmem=15G
+
+
+Output files used for the following analysis include: 
+
+#NBL CNV vs exp analysis
+
+```{r}
+
+#CHUNK1 - NBL: Load the results from GISTIC (how this was obtained is explained in README). The format of the file is weird and the code here is relevant to taking the results and putting into a table format with samples as columns and peaks as rows. Then we take the overlap results - genes that overlap the CNV regions (again check README for how this was done). Then we match the RNA-seq samples with the WGS samples. Finally from this merged info we compare expression of a gene for which there are samples with/without a CNV peak overlapping the gene. We determine signficant expression difference using the wilcoxon signed rank test 
+
+#CNV results for NBL conf threshold 90.
+
+nbl_cnv = read.delim("../Data/TARGET/CNV_SV_Data/GISTIC_Results/NBL/NBL_all_lesions.conf_90.txt")
+nbl_cnv_short = nbl_cnv[c(1:26),]
+rownames(nbl_cnv_short) = nbl_cnv_short$Unique.Name
+nbl_cnv_meta = nbl_cnv_short[,c(1:2,7)]
+nbl_cnv_meta$chr = unlist(lapply(nbl_cnv_meta[,3],function(x) strsplit(as.character(x),":")))[seq(1,52,2)]
+nbl_cnv_meta$temp = unlist(lapply(nbl_cnv_meta[,3],function(x) strsplit(as.character(x),":")))[seq(2,52,2)]
+nbl_cnv_meta$start = unlist(lapply(nbl_cnv_meta$temp,function(x) strsplit(as.character(x),"-")))[seq(1,52,2)]
+nbl_cnv_meta$stop = unlist(lapply(nbl_cnv_meta$temp,function(x) strsplit(as.character(x),"-")))[seq(2,52,2)]
+
+nbl_cnv_meta = nbl_cnv_meta[!duplicated(nbl_cnv_meta$temp),]
+nbl_cnv_meta$temp = NULL
+
+#make bed file of CNV regions so that we can then perform bedtools intersect with our gene annotation file.
+
+#write.table(nbl_cnv_meta[,c(4:6,1)],"NBL_CNV_Peaks.bed",quote=F,row.names=F,col.names = F,sep="\t")
+
+#Overlap:
+
+#bedtools intersect -a NBL_CNV_Peaks.bed -b PanTarget_GeneAnnotation_111819_MostUpDate_040102.bed -wo > NBL_CNV_Overlap_Genes_040120.bed
+
+nbl_cnv_genes = read.delim("../Data/TARGET/CNV_SV_Data/GISTIC_Results/NBL/NBL_CNV_Overlap_Genes_040120.bed",stringsAsFactors = F,header=F)
+
+nbl_cnv_genes$genes = nbl_cnv_genes$V8
+nbl_cnv_genes = nbl_cnv_genes[!duplicated(nbl_cnv_genes),]
+nbl_cnv_genes$type = "None"
+nbl_cnv_genes[nbl_cnv_genes$genes%in%rownames(noncoding),]$type = "lncRNA"
+nbl_cnv_genes[nbl_cnv_genes$genes%in%rownames(protein),]$type = "protein_coding"
+
+nbl_cnv_short = nbl_cnv_short[,grep("TARGET.30",colnames(nbl_cnv_short))]
+
+#overlap of samples with RNAs-seq and with WGS 
+nbl_rna_name = data.frame(colnames(NBL))
+nbl_rna_name$short = gsub("-","\\.",nbl_rna_name[,1])
+nbl_rna_name$short = substr(nbl_rna_name$short,1,20)
+rownames(nbl_rna_name) = nbl_rna_name[,1]
+
+nbl_dna_name = colnames(nbl_cnv_short)[grep("TARGET.30",colnames(nbl_cnv_short))]
+nbl_dna_name = substr(nbl_dna_name,1,20)
+
+nbl_cnv_short["short_name",] = nbl_dna_name
+nbl_cnv_short = data.frame(t(nbl_cnv_short))
+nbl_cnv_short = nbl_cnv_short[nbl_cnv_short$short_name%in%nbl_rna_name$short,]
+nbl_cnv_short = nbl_cnv_short[!duplicated(nbl_cnv_short$short_name),]
+
+nbl_rna_name = nbl_rna_name[nbl_rna_name$short%in%nbl_cnv_short$short_name,]
+
+#97 overlap - 161 rna-seq, 146 wgs
+NBL_cnv_exp = NBL[,colnames(NBL)%in%nbl_rna_name[,1],]
+
+#get the expression for the genes that overlap the CNV regions 
+
+NBL_cnv_exp = NBL_cnv_exp[rownames(NBL_cnv_exp)%in%nbl_cnv_genes$V8,]
+
+colnames(NBL_cnv_exp) = nbl_rna_name$short
+rownames(nbl_cnv_short) = nbl_cnv_short$short_name
+
+rownames(nbl_cnv_meta) = gsub(" ","\\.",rownames(nbl_cnv_meta))
+
+nbl_cnv_genes$V4 = gsub(" ","\\.",nbl_cnv_genes$V4) 
+
+#look to see if samples with CNV have signficant difference in expression for any given gene
+
+NBL_exp_sig = list()
+NBL_noCNV = list()
+NBL_CNV = list()
+NBL_exp_ttest = list()
+
+for (genes in rownames(NBL_cnv_exp)){
+  copy_temp = data.frame(t(NBL_cnv_exp[genes,]))
+  
+  for (peaks in nbl_cnv_genes[nbl_cnv_genes$V8%in%genes,4]){
+      copy_temp$CNV = as.character(nbl_cnv_short[rownames(copy_temp),peaks])
+      #copy_temp = copy_temp[copy_temp$CNV!=1,]
+      copy_temp[copy_temp$CNV==1,]$CNV = 2
+      if (length(table(copy_temp$CNV)) ==2){
+        NBL_exp_sig[[paste(genes,peaks,sep="__")]] = c(wilcox.test(copy_temp[,1] ~ copy_temp$CNV,data=copy_temp)[3]$p.value,peaks,table(copy_temp$CNV)[[1]],table(copy_temp$CNV)[[2]],mean(copy_temp[copy_temp$CNV==names(table(copy_temp$CNV))[1],1]),mean(copy_temp[copy_temp$CNV==names(table(copy_temp$CNV))[2],1]))
+      }
+      #ggplot(copy_temp,aes(copy_temp$CNV,copy_temp$ENSG00000265206.2))+geom_boxplot()
+  }
+}
+
+NBL_exp_sig = data.frame(NBL_exp_sig)
+NBL_exp_sig = data.frame(t(NBL_exp_sig))
+#NBL_exp_sig$ttest = unlist(NBL_exp_ttest)
+NBL_exp_sig[,1] = as.numeric(as.character(NBL_exp_sig[,1]))
+NBL_exp_sig$padj = p.adjust(NBL_exp_sig[,1],"hochberg")
+NBL_exp_sig = data.frame(NBL_exp_sig[!is.na(NBL_exp_sig[,1]),])
+NBL_exp_sig$gene = rownames(NBL_exp_sig)
+temp = unlist(strsplit(NBL_exp_sig$gene,"__"))
+temp = temp[seq(1,length(temp)-1,2)]
+NBL_exp_sig$gene = temp
+NBL_exp_sig$gene_name = genes_anno[as.character(NBL_exp_sig$gene),4]
+NBL_exp_sig$chr = genes_anno[as.character(NBL_exp_sig$gene),5]
+NBL_exp_sig$type = "None"
+NBL_exp_sig[NBL_exp_sig$gene%in%rownames(noncoding),]$type = "lncRNA"
+NBL_exp_sig[NBL_exp_sig$gene%in%rownames(protein),]$type = "protein_coding"
+
+
+  
+nbl_cnv_short$short_name = NULL
+nbl_cnv_short = t(nbl_cnv_short)
+nbl_cnv_meta$Unique.Name= gsub(" ","\\.",nbl_cnv_meta$Unique.Name)
+nbl_cnv_short = nbl_cnv_short[rownames(nbl_cnv_short)%in%nbl_cnv_meta$Unique.Name,]
+nbl_cnv_meta$none = apply(nbl_cnv_short,1,function(x) length(x[x==0]))
+nbl_cnv_meta$one = apply(nbl_cnv_short,1,function(x) length(x[x==1]))
+nbl_cnv_meta$two = apply(nbl_cnv_short,1,function(x) length(x[x==2]))
+nbl_cnv_meta$sum = rowSums(nbl_cnv_meta[,c(8:9)])
+
+```
+
+#AML CNV vs exp analysis
+
+```{r}
+#CHUNK2 - AML: Load the results from GISTIC (how this was obtained is explained in README). The format of the file is weird and the code here is relevant to taking the results and putting into a table format with samples as columns and peaks as rows. Then we take the overlap results - genes that overlap the CNV regions (again check README for how this was done). Then we match the RNA-seq samples with the WGS samples. Finally from this merged info we compare expression of a gene for which there are samples with/without a CNV peak overlapping the gene. We determine signficant expression difference using the wilcoxon signed rank test 
+
+#confirm that duplicates are only relapse and not BM/blood?
+
+aml_cnv = read.delim("../Data/TARGET/CNV_SV_Data/GISTIC_Results/AML/AML_all_lesions.conf_90.txt")
+aml_cnv_short = aml_cnv[c(1:70),]
+rownames(aml_cnv_short) = aml_cnv_short$Unique.Name
+aml_cnv_meta = aml_cnv_short[,c(1:2,7)]
+aml_cnv_meta$chr = unlist(lapply(aml_cnv_meta[,3],function(x) strsplit(as.character(x),":")))[seq(1,140,2)]
+aml_cnv_meta$temp = unlist(lapply(aml_cnv_meta[,3],function(x) strsplit(as.character(x),":")))[seq(2,140,2)]
+aml_cnv_meta$start = unlist(lapply(aml_cnv_meta$temp,function(x) strsplit(as.character(x),"-")))[seq(1,140,2)]
+aml_cnv_meta$stop = unlist(lapply(aml_cnv_meta$temp,function(x) strsplit(as.character(x),"-")))[seq(2,140,2)]
+
+aml_cnv_meta = aml_cnv_meta[!duplicated(aml_cnv_meta$temp),]
+aml_cnv_meta$temp = NULL
+
+#write.table(aml_cnv_meta[,c(4:6,1)],"AML_CNV_Peaks_0820.bed",quote=F,row.names=F,col.names = F,sep="\t")
+
+#bedtools intersect -a AML_CNV_Peaks.bed -b PanTarget_GeneAnnotation_111819_MostUpDate_040102.bed -wo > AML_CNV_Overlap_Genes_040120.bed
+
+aml_cnv_genes = read.delim("../Data/TARGET/CNV_SV_Data/GISTIC_Results/AML/AML_CNV_Overlap_Genes_040120_0820.bed",stringsAsFactors = F,header=F)
+#aml_cnv_genes$genes = genes_trans[as.character(aml_cnv_genes$V8),1]
+aml_cnv_genes$genes = aml_cnv_genes$V8
+aml_cnv_genes = aml_cnv_genes[!duplicated(aml_cnv_genes),]
+
+aml_cnv_genes$type = "None"
+aml_cnv_genes[aml_cnv_genes$V8%in%rownames(noncoding),]$type = "lncRNA"
+aml_cnv_genes[aml_cnv_genes$V8%in%rownames(protein),]$type = "protein_coding"
+
+aml_cnv_short = aml_cnv_short[,grep("TARGET.20",colnames(aml_cnv_short))]
+
+#overlap of samples with RNAs-seq and with WGS 
+aml_rna_name = data.frame(colnames(AML))
+aml_rna_name$short = gsub("-","\\.",aml_rna_name[,1])
+aml_rna_name$short = substr(aml_rna_name$short,1,20)
+rownames(aml_rna_name) = aml_rna_name[,1]
+
+aml_dna_name = colnames(aml_cnv_short)[grep("TARGET.20",colnames(aml_cnv_short))]
+aml_dna_name = substr(aml_dna_name,1,20)
+
+aml_cnv_short["short_name",] = aml_dna_name
+aml_cnv_short = data.frame(t(aml_cnv_short))
+aml_cnv_short = aml_cnv_short[aml_cnv_short$short_name%in%aml_rna_name$short,]
+
+
+aml_rna_name = aml_rna_name[aml_rna_name$short%in%aml_cnv_short$short_name,]
+
+#165 overlap - 282 rna-seq, 277 wgs
+#173 - 280 rna-seq, 297 wgs 
+aml_cnv_exp = AML[,colnames(AML)%in%aml_rna_name[,1],]
+
+#get the expression for the genes that overlap the CNV regions 
+
+aml_cnv_exp = aml_cnv_exp[rownames(aml_cnv_exp)%in%aml_cnv_genes$V8,]
+
+colnames(aml_cnv_exp) = aml_rna_name$short
+rownames(aml_cnv_short) = aml_cnv_short$short_name
+
+rownames(aml_cnv_meta) = gsub(" ","\\.",rownames(aml_cnv_meta))
+
+aml_cnv_genes$V4 = gsub(" ","\\.",aml_cnv_genes$V4) 
+
+#look to see if samples with CNV have signficant difference in expression for any given gene
+
+aml_exp_sig = list()
+aml_noCNV = list()
+aml_CNV = list()
+aml_exp_ttest = list()
+
+for (genes in rownames(aml_cnv_exp)){
+  copy_temp = data.frame(t(aml_cnv_exp[genes,]))
+  
+  for (peaks in aml_cnv_genes[aml_cnv_genes$V8==genes,4]){
+    
+      copy_temp$CNV = as.character(aml_cnv_short[rownames(copy_temp),peaks])
+      #copy_temp = copy_temp[copy_temp$CNV!=1,]
+      copy_temp[copy_temp$CNV==1,]$CNV = 2
+      if (length(table(copy_temp$CNV)) ==2){
+        aml_exp_sig[[paste(genes,peaks,sep="__")]] = c(wilcox.test(copy_temp[,1] ~ copy_temp$CNV,data=copy_temp)[3]$p.value,peaks,table(copy_temp$CNV)[[1]],table(copy_temp$CNV)[[2]],mean(copy_temp[copy_temp$CNV==names(table(copy_temp$CNV))[1],1]),mean(copy_temp[copy_temp$CNV==names(table(copy_temp$CNV))[2],1]))
+      }
+      #ggplot(copy_temp,aes(copy_temp$CNV,copy_temp$ENSG00000265206.2))+geom_boxplot()
+  }
+}
+
+aml_exp_sig = data.frame(aml_exp_sig)
+aml_exp_sig = data.frame(t(aml_exp_sig))
+#aml_exp_sig$ttest = unlist(aml_exp_ttest)
+aml_exp_sig[,1] = as.numeric(as.character(aml_exp_sig[,1]))
+aml_exp_sig$padj = p.adjust(aml_exp_sig[,1],"hochberg")
+aml_exp_sig = data.frame(aml_exp_sig[!is.na(aml_exp_sig[,1]),])
+aml_exp_sig$gene = rownames(aml_exp_sig)
+temp = unlist(strsplit(aml_exp_sig$gene,"__"))
+temp = temp[seq(1,length(temp)-1,2)]
+aml_exp_sig$gene = temp
+aml_exp_sig$gene_name = genes_anno[as.character(aml_exp_sig$gene),4]
+aml_exp_sig$chr = genes_anno[as.character(aml_exp_sig$gene),5]
+aml_exp_sig$type = "None"
+aml_exp_sig[aml_exp_sig$gene%in%rownames(noncoding),]$type = "lncRNA"
+aml_exp_sig[aml_exp_sig$gene%in%rownames(protein),]$type = "protein_coding"
+
+
+aml_cnv_short$short_name = NULL
+aml_cnv_short = t(aml_cnv_short)
+aml_cnv_meta$Unique.Name= gsub(" ","\\.",aml_cnv_meta$Unique.Name)
+aml_cnv_short = aml_cnv_short[rownames(aml_cnv_short)%in%aml_cnv_meta$Unique.Name,]
+aml_cnv_meta$none = apply(aml_cnv_short,1,function(x) length(x[x==0]))
+aml_cnv_meta$one = apply(aml_cnv_short,1,function(x) length(x[x==1]))
+aml_cnv_meta$two = apply(aml_cnv_short,1,function(x) length(x[x==2]))
+aml_cnv_meta$sum = rowSums(aml_cnv_meta[,c(8:9)])
+
+
+```
+
+#B-ALL CNV vs exp analysis
+
+
+```{r}
+#CHUNK3 - B-ALL: Load the results from GISTIC (how this was obtained is explained in README). The format of the file is weird and the code here is relevant to taking the results and putting into a table format with samples as columns and peaks as rows. Then we take the overlap results - genes that overlap the CNV regions (again check README for how this was done). Then we match the RNA-seq samples with the WGS samples. Finally from this merged info we compare expression of a gene for which there are samples with/without a CNV peak overlapping the gene. We determine signficant expression difference using the wilcoxon signed rank test 
+
+ball_cnv = read.delim("../Data/TARGET/CNV_SV_Data/GISTIC_Results/B-ALL/BALL_nodup_all_lesions.conf_90.txt")
+ball_cnv_short = ball_cnv[c(1:67),]
+rownames(ball_cnv_short) = ball_cnv_short$Unique.Name
+ball_cnv_meta = ball_cnv_short[,c(1:2,7)]
+ball_cnv_meta$chr = unlist(lapply(ball_cnv_meta[,3],function(x) strsplit(as.character(x),":")))[seq(1,134,2)]
+ball_cnv_meta$temp = unlist(lapply(ball_cnv_meta[,3],function(x) strsplit(as.character(x),":")))[seq(2,134,2)]
+ball_cnv_meta$start = unlist(lapply(ball_cnv_meta$temp,function(x) strsplit(as.character(x),"-")))[seq(1,134,2)]
+ball_cnv_meta$stop = unlist(lapply(ball_cnv_meta$temp,function(x) strsplit(as.character(x),"-")))[seq(2,134,2)]
+
+ball_cnv_meta = ball_cnv_meta[!duplicated(ball_cnv_meta$temp),]
+ball_cnv_meta$temp = NULL
+
+#write.table(ball_cnv_meta[,c(4:6,1)],"BALL_CNV_Peaks_0820.bed",quote=F,row.names=F,col.names = F,sep="\t")
+
+#ball_cnv_genes = read.delim("../Results/BALL_CNV_Overlap_Genes.bed",stringsAsFactors = F,header=F)
+
+#bedtools intersect -a BALL_CNV_Peaks.bed -b PanTarget_GeneAnnotation_111819_MostUpDate_040102.bed -wo > BALL_CNV_Overlap_Genes_040120_0820.bed
+
+ball_cnv_genes = read.delim("../Data/TARGET/CNV_SV_Data/GISTIC_Results/B-ALL/BALL_CNV_Overlap_Genes_040120_0820.bed",stringsAsFactors = F,header=F)
+
+#ball_cnv_genes$genes = genes_trans[as.character(ball_cnv_genes$V8),1]
+ball_cnv_genes$genes = ball_cnv_genes$V8
+ball_cnv_genes = ball_cnv_genes[!duplicated(ball_cnv_genes),]
+
+ball_cnv_genes$type = "None"
+ball_cnv_genes[ball_cnv_genes$V8%in%rownames(noncoding),]$type = "lncRNA"
+ball_cnv_genes[ball_cnv_genes$V8%in%rownames(protein),]$type = "protein_coding"
+
+ball_cnv_short = ball_cnv_short[,grep("TARGET.10",colnames(ball_cnv_short))]
+
+#overlap of samples with RNAs-seq and with WGS 
+ball_rna_name = data.frame(colnames(BALL))
+ball_rna_name$short = gsub("-","\\.",ball_rna_name[,1])
+ball_rna_name$short = substr(ball_rna_name$short,1,20)
+rownames(ball_rna_name) = ball_rna_name[,1]
+
+ball_dna_name = colnames(ball_cnv_short)[grep("TARGET.10",colnames(ball_cnv_short))]
+ball_dna_name = substr(ball_dna_name,1,20)
+
+ball_cnv_short["short_name",] = ball_dna_name
+ball_cnv_short = data.frame(t(ball_cnv_short))
+ball_cnv_short = ball_cnv_short[ball_cnv_short$short_name%in%ball_rna_name$short,]
+ball_cnv_short = ball_cnv_short[!duplicated(ball_cnv_short$short_name),]
+
+ball_rna_name = ball_rna_name[ball_rna_name$short%in%ball_cnv_short$short_name,]
+
+#144 overlap - 194 rna-seq, 376 wgs
+ball_cnv_exp = BALL[,colnames(BALL)%in%ball_rna_name[,1],]
+
+#get the expression for the genes that overlap the CNV regions 
+
+ball_cnv_exp = ball_cnv_exp[rownames(ball_cnv_exp)%in%ball_cnv_genes$V8,]
+
+colnames(ball_cnv_exp) = ball_rna_name$short
+rownames(ball_cnv_short) = ball_cnv_short$short_name
+
+rownames(ball_cnv_meta) = gsub(" ","\\.",rownames(ball_cnv_meta))
+
+ball_cnv_genes$V4 = gsub(" ","\\.",ball_cnv_genes$V4) 
+
+#look to see if samples with CNV have signficant difference in expression for any given gene
+
+
+ball_exp_sig = list()
+ball_noCNV = list()
+ball_CNV = list()
+ball_exp_ttest = list()
+count = 0
+for (genes in rownames(ball_cnv_exp)){
+  copy_temp = data.frame(t(ball_cnv_exp[genes,]))
+
+  for (peaks in ball_cnv_genes[ball_cnv_genes$V8==genes,4]){
+    
+      copy_temp$CNV = as.character(ball_cnv_short[rownames(copy_temp),peaks])
+      #copy_temp = copy_temp[copy_temp$CNV!=1,]
+      copy_temp[copy_temp$CNV==1,]$CNV = 2
+      if (length(table(copy_temp$CNV)) ==2){
+        ball_exp_sig[[paste(genes,peaks,sep="__")]] = c(wilcox.test(copy_temp[,1] ~ copy_temp$CNV,data=copy_temp)[3]$p.value,peaks,table(copy_temp$CNV)[[1]],table(copy_temp$CNV)[[2]],mean(copy_temp[copy_temp$CNV==names(table(copy_temp$CNV))[1],1]),mean(copy_temp[copy_temp$CNV==names(table(copy_temp$CNV))[2],1]))
+      }
+      #ggplot(copy_temp,aes(copy_temp$CNV,copy_temp$ENSG00000265206.2))+geom_boxplot()
+  }
+}
+
+ball_exp_sig = data.frame(ball_exp_sig)
+ball_exp_sig = data.frame(t(ball_exp_sig))
+#ball_exp_sig$ttest = unlist(ball_exp_ttest)
+ball_exp_sig[,1] = as.numeric(as.character(ball_exp_sig[,1]))
+ball_exp_sig$padj = p.adjust(ball_exp_sig[,1],"hochberg")
+ball_exp_sig = data.frame(ball_exp_sig[!is.na(ball_exp_sig[,1]),])
+ball_exp_sig$gene = rownames(ball_exp_sig)
+temp = unlist(strsplit(ball_exp_sig$gene,"__"))
+temp = temp[seq(1,length(temp)-1,2)]
+ball_exp_sig$gene = temp
+ball_exp_sig$gene_name = genes_anno[as.character(ball_exp_sig$gene),4]
+ball_exp_sig$chr = genes_anno[as.character(ball_exp_sig$gene),5]
+ball_exp_sig$type = "None"
+ball_exp_sig[ball_exp_sig$gene%in%rownames(noncoding),]$type = "lncRNA"
+ball_exp_sig[ball_exp_sig$gene%in%rownames(protein),]$type = "protein_coding"
+
+ball_cnv_short$short_name = NULL
+ball_cnv_short = t(ball_cnv_short)
+ball_cnv_meta$Unique.Name= gsub(" ","\\.",ball_cnv_meta$Unique.Name)
+ball_cnv_meta  = ball_cnv_meta[!(ball_cnv_meta$Unique.Name%in%c("Deletion.Peak.21")),] 
+ball_cnv_short = ball_cnv_short[rownames(ball_cnv_short)%in%ball_cnv_meta$Unique.Name,]
+ball_cnv_meta$none = apply(ball_cnv_short,1,function(x) length(x[x==0]))
+ball_cnv_meta$one = apply(ball_cnv_short,1,function(x) length(x[x==1]))
+ball_cnv_meta$two = apply(ball_cnv_short,1,function(x) length(x[x==2]))
+ball_cnv_meta$sum = rowSums(ball_cnv_meta[,c(8:9)])
+
+```
+
+#WT CNV vs exp analysis
+
+```{r}
+#CHUNK4 - WT: Load the results from GISTIC (how this was obtained is explained in README). The format of the file is weird and the code here is relevant to taking the results and putting into a table format with samples as columns and peaks as rows. Then we take the overlap results - genes that overlap the CNV regions (again check README for how this was done). Then we match the RNA-seq samples with the WGS samples. Finally from this merged info we compare expression of a gene for which there are samples with/without a CNV peak overlapping the gene. We determine signficant expression difference using the wilcoxon signed rank test 
+
+wt_cnv = read.delim("../Data/TARGET/CNV_SV_Data/GISTIC_Results/WT/WT_all_lesions.conf_90.txt")
+wt_cnv_short = wt_cnv[c(1:23),]
+rownames(wt_cnv_short) = wt_cnv_short$Unique.Name
+wt_cnv_meta = wt_cnv_short[,c(1:2,7)]
+wt_cnv_meta$chr = unlist(lapply(wt_cnv_meta[,3],function(x) strsplit(as.character(x),":")))[seq(1,46,2)]
+wt_cnv_meta$temp = unlist(lapply(wt_cnv_meta[,3],function(x) strsplit(as.character(x),":")))[seq(2,46,2)]
+wt_cnv_meta$start = unlist(lapply(wt_cnv_meta$temp,function(x) strsplit(as.character(x),"-")))[seq(1,46,2)]
+wt_cnv_meta$stop = unlist(lapply(wt_cnv_meta$temp,function(x) strsplit(as.character(x),"-")))[seq(2,46,2)]
+
+wt_cnv_meta = wt_cnv_meta[!duplicated(wt_cnv_meta$temp),]
+wt_cnv_meta$temp = NULL
+
+#write.table(wt_cnv_meta[,c(4:6,1)],"WT_CNV_Peaks.bed",quote=F,row.names=F,col.names = F,sep="\t")
+
+#wt_cnv_genes = read.delim("../Results/WT_CNV_Overlap_Genes.bed",stringsAsFactors = F,header=F)
+
+#bedtools intersect -a WT_CNV_Peaks.bed -b PanTarget_GeneAnnotation_111819_MostUpDate_040102.bed -wo > WT_CNV_Overlap_Genes_040120.bed
+
+wt_cnv_genes = read.delim("../Data/TARGET/CNV_SV_Data/GISTIC_Results/WT/WT_CNV_Overlap_Genes_040120.bed",stringsAsFactors = F,header=F)
+#wt_cnv_genes$genes = genes_trans[as.character(wt_cnv_genes$V8),1]
+wt_cnv_genes$genes = wt_cnv_genes$V8
+wt_cnv_genes = wt_cnv_genes[!duplicated(wt_cnv_genes),]
+
+wt_cnv_genes$type = "None"
+wt_cnv_genes[wt_cnv_genes$V8%in%rownames(noncoding),]$type = "lncRNA"
+wt_cnv_genes[wt_cnv_genes$V8%in%rownames(protein),]$type = "protein_coding"
+
+wt_cnv_short = wt_cnv_short[,grep("TARGET.50",colnames(wt_cnv_short))]
+
+#overlap of samples with RNAs-seq and with WGS 
+wt_rna_name = data.frame(colnames(WT))
+wt_rna_name$short = gsub("-","\\.",wt_rna_name[,1])
+wt_rna_name$short = substr(wt_rna_name$short,1,20)
+rownames(wt_rna_name) = wt_rna_name[,1]
+
+wt_dna_name = colnames(wt_cnv_short)[grep("TARGET.50",colnames(wt_cnv_short))]
+wt_dna_name = substr(wt_dna_name,1,20)
+
+wt_cnv_short["short_name",] = wt_dna_name
+wt_cnv_short = data.frame(t(wt_cnv_short))
+wt_cnv_short = wt_cnv_short[wt_cnv_short$short_name%in%wt_rna_name$short,]
+wt_cnv_short = wt_cnv_short[!duplicated(wt_cnv_short$short_name),]
+
+wt_rna_name = wt_rna_name[wt_rna_name$short%in%wt_cnv_short$short_name,]
+
+#76 overlap - 128 rna-seq, 94 wgs
+wt_cnv_exp = WT[,colnames(WT)%in%wt_rna_name[,1],]
+
+#get the expression for the genes that overlap the CNV regions 
+
+wt_cnv_exp = wt_cnv_exp[rownames(wt_cnv_exp)%in%wt_cnv_genes$V8,]
+
+colnames(wt_cnv_exp) = wt_rna_name$short
+rownames(wt_cnv_short) = wt_cnv_short$short_name
+
+rownames(wt_cnv_meta) = gsub(" ","\\.",rownames(wt_cnv_meta))
+
+wt_cnv_genes$V4 = gsub(" ","\\.",wt_cnv_genes$V4) 
+
+#look to see if samples with CNV have signficant difference in expression for any given gene
+
+wt_exp_sig = list()
+wt_noCNV = list()
+wt_CNV = list()
+wt_exp_ttest = list()
+
+for (genes in rownames(wt_cnv_exp)){
+  copy_temp = data.frame(t(wt_cnv_exp[genes,]))
+  
+  for (peaks in wt_cnv_genes[wt_cnv_genes$V8==genes,4]){
+      copy_temp$CNV = as.character(wt_cnv_short[rownames(copy_temp),peaks])
+      #copy_temp = copy_temp[copy_temp$CNV!=1,]
+      copy_temp[copy_temp$CNV==1,]$CNV = 2
+      if (length(table(copy_temp$CNV)) ==2){
+        wt_exp_sig[[paste(genes,peaks,sep="__")]] = c(wilcox.test(copy_temp[,1] ~ copy_temp$CNV,data=copy_temp)[3]$p.value,peaks,table(copy_temp$CNV)[[1]],table(copy_temp$CNV)[[2]],mean(copy_temp[copy_temp$CNV==names(table(copy_temp$CNV))[1],1]),mean(copy_temp[copy_temp$CNV==names(table(copy_temp$CNV))[2],1]))
+      }
+      #ggplot(copy_temp,aes(copy_temp$CNV,copy_temp$ENSG00000265206.2))+geom_boxplot()
+  }
+}
+
+wt_exp_sig = data.frame(wt_exp_sig)
+wt_exp_sig = data.frame(t(wt_exp_sig))
+#wt_exp_sig$ttest = unlist(wt_exp_ttest)
+wt_exp_sig[,1] = as.numeric(as.character(wt_exp_sig[,1]))
+wt_exp_sig$padj = p.adjust(wt_exp_sig[,1],"hochberg")
+wt_exp_sig = data.frame(wt_exp_sig[!is.na(wt_exp_sig[,1]),])
+wt_exp_sig$gene = rownames(wt_exp_sig)
+temp = unlist(strsplit(wt_exp_sig$gene,"__"))
+temp = temp[seq(1,length(temp)-1,2)]
+wt_exp_sig$gene = temp
+wt_exp_sig$gene_name = genes_anno[as.character(wt_exp_sig$gene),4]
+wt_exp_sig$chr = genes_anno[as.character(wt_exp_sig$gene),5]
+wt_exp_sig$type = "None"
+wt_exp_sig[wt_exp_sig$gene%in%rownames(noncoding),]$type = "lncRNA"
+wt_exp_sig[wt_exp_sig$gene%in%rownames(protein),]$type = "protein_coding"
+
+wt_cnv_short$short_name = NULL
+wt_cnv_short = t(wt_cnv_short)
+wt_cnv_meta$Unique.Name= gsub(" ","\\.",wt_cnv_meta$Unique.Name)
+wt_cnv_short = wt_cnv_short[rownames(wt_cnv_short)%in%wt_cnv_meta$Unique.Name,]
+wt_cnv_meta$none = apply(wt_cnv_short,1,function(x) length(x[x==0]))
+wt_cnv_meta$one = apply(wt_cnv_short,1,function(x) length(x[x==1]))
+wt_cnv_meta$two = apply(wt_cnv_short,1,function(x) length(x[x==2]))
+wt_cnv_meta$sum = rowSums(wt_cnv_meta[,c(8:9)])
+
+```
+
+#Data for Supplementary Table 7:
+
+```{r}
+
+aml_cnv_meta$cancer = "AML"
+ball_cnv_meta$cancer = "B-ALL"
+nbl_cnv_meta$cancer = "NBL"
+wt_cnv_meta$cancer = "WT"
+pancancer = rbind(aml_cnv_meta,ball_cnv_meta,nbl_cnv_meta,wt_cnv_meta)
+#write.table(pancancer,"Regions_CNV_SampleSize_PanCancer.txt",quote=F,row.names=F,sep="\t")
+
+```
+
+#Data for Supplementary Table 8 and downstream analyses: 
+
+```{r}
+#Here we combine all the CNV results from above. Note we only have WGS for AML, B-ALL, WT, and NBL. We annotated gene name and type and cancer all into one table. 
+
+#combined CNV dysregulation results 
+aml_exp_sig$cancer = "AML"
+aml_exp_sig$gene = gsub("lnc.","lnc-",aml_exp_sig$gene)
+aml_exp_sig$gene = gsub("RP11.","RP11-",aml_exp_sig$gene)
+aml_exp_sig$gene = gsub("TRG.AS1","TRG-AS1",aml_exp_sig$gene)
+aml_exp_sig$gene_name = genes_anno[as.character(aml_exp_sig$gene),4]
+ball_exp_sig$cancer = "BALL"
+ball_exp_sig$gene = gsub("lnc.","lnc-",ball_exp_sig$gene)
+ball_exp_sig$gene = gsub("RP11.","RP11-",ball_exp_sig$gene)
+ball_exp_sig$gene = gsub("TRG.AS1","TRG-AS1",ball_exp_sig$gene)
+ball_exp_sig$gene = gsub("NIPBL.AS1","NIPBL-AS1",ball_exp_sig$gene)
+ball_exp_sig$gene_name = genes_anno[as.character(ball_exp_sig$gene),4]
+NBL_exp_sig$cancer = "NBL"
+NBL_exp_sig$gene = gsub("lnc.","lnc-",NBL_exp_sig$gene)
+NBL_exp_sig$gene = gsub("RP11.","RP11-",NBL_exp_sig$gene)
+NBL_exp_sig$gene = NBL_exp_sig$gene
+NBL_exp_sig$gene_name = genes_anno[as.character(NBL_exp_sig$gene),4]
+wt_exp_sig$cancer = "WT"
+wt_exp_sig$gene = gsub("lnc.","lnc-",wt_exp_sig$gene)
+wt_exp_sig$gene = gsub("RP11.","RP11-",wt_exp_sig$gene)
+wt_exp_sig$gene = wt_exp_sig$gene
+wt_exp_sig$gene_name = genes_anno[as.character(wt_exp_sig$gene),4]
+
+pantarget_cnv = rbind(aml_exp_sig,ball_exp_sig,NBL_exp_sig,wt_exp_sig)
+pantarget_cnv$gene = gsub("lnc-NKX1.1","lnc-NKX1-1",pantarget_cnv$gene)
+pantarget_cnv[pantarget_cnv$gene == "lnc-NKX1-1",]$gene_name = "lnc-NKX1-1"
+pantarget_cnv$padj = NULL
+pantarget_cnv$gene_name = genes_anno[as.character(pantarget_cnv$gene),4]
+pantarget_cnv$chr = genes_anno[as.character(pantarget_cnv$gene),5]
+pantarget_cnv[pantarget_cnv$gene%in%rownames(noncoding),]$type = "lncRNA"
+pantarget_cnv[pantarget_cnv$gene%in%rownames(protein),]$type = "protein_coding"
+
+
+#log2 fold change -  mean of group 1 vs group 2
+
+pantarget_cnv$fold_change = log2(as.numeric(as.character(pantarget_cnv$X6))/as.numeric(as.character(pantarget_cnv$X5)))
+
+pantarget_cnv$sig = "No"
+
+#select as significant if 1) the sample size for each group is > 5, if the p-value is < 0.05, and if the log fold change is =>1.5
+
+pantarget_cnv[as.numeric(as.character(pantarget_cnv$X3))>5 & as.numeric(as.character(pantarget_cnv$X4))>5 & pantarget_cnv[,1]<0.05 & abs(pantarget_cnv$fold_change)>=0.585,]$sig = "yes"
+
+pantarget_cnv$X5 = as.numeric(as.character(pantarget_cnv$X5))
+pantarget_cnv$X6 = as.numeric(as.character(pantarget_cnv$X6))
+
+#annotate which genes are sig impacted by cnv (regardless of samples size)
+pantarget_cnv$pval_sig = "No"
+pantarget_cnv[pantarget_cnv$X1<0.05,]$pval_sig = "yes"
+
+#make sure you look at appropriate exp gene and cancer combo - this accounts for only keeping high confidence genes 
+pantarget_cnv$genc = paste(pantarget_cnv$gene,pantarget_cnv$cancer,sep="_")
+all_genes_cancer$both = paste(all_genes_cancer$X1,all_genes_cancer$X2,sep="_")
+
+pantarget_cnv = pantarget_cnv[pantarget_cnv$genc%in%all_genes_cancer$both,]
+
+#remove any non-protein or lncRNA types
+pantarget_cnv = pantarget_cnv[pantarget_cnv$type!="None",]
+
+#annotate the CNV type
+pantarget_cnv$CNV_type = "None"
+
+pantarget_cnv[grep("Deletion",pantarget_cnv$X2),]$CNV_type = "Deletion"
+pantarget_cnv[grep("Amp",pantarget_cnv$X2),]$CNV_type = "Amplification"
+
+#subset the significant results
+pantarget_cnv_sig = pantarget_cnv[pantarget_cnv$sig =="yes",]
+
+#673 total unique lncRNAs (841 total)
+#198 unique significant lncs (206 total)
+
+#write.table(pantarget_cnv,"PanTarget_CNV_Expression_Results_0820.txt",quote=F,col.names = T,sep="\t")
+
+pantarget_cnv$sig_new = as.character(pantarget_cnv$sig)
+
+pantarget_cnv[pantarget_cnv$X3>5 & pantarget_cnv$X4>5 & pantarget_cnv$X1<0.1 & abs(pantarget_cnv$fold_change)>0,]$sig_new = "yes_moderate"
+
+pantarget_cnv[pantarget_cnv$X3>5 & pantarget_cnv$X4>5 & pantarget_cnv$X1<0.05 & abs(pantarget_cnv$fold_change)>0.58,]$sig_new = "yes_high"
+
+#write.table(pantarget_cnv,"../PanTarget_CNV_Expression_Results_0820.txt",quote=F,row.names=F,sep="\t")
+
+pantarget_cnv = pantarget_cnv[pantarget_cnv$X3>5 & pantarget_cnv$X4>5,]
+
+#SUPPLEMENTARY TABLE 8 Here: 
+
+#write.table(pantarget_cnv,"../PanTarget_CNV_Expression_Results_0820_n5.txt",quote=F,row.names=F,sep="\t")
+
+```
+
+#Figure 3a - Proportion of lncRNAs vs protein coding genes that are dysregulated due to CNV: 
+
+```{r}
+#Proportion of genes in CNA regions that are dysregulated 
+
+prop_sig = data.frame(table(pantarget_cnv[,c("cancer","type","CNV_type","sig")]))
+temp = prop_sig$Freq[17:32]
+prop_sig = prop_sig[1:16,]
+prop_sig$sig = temp
+prop_sig$total = prop_sig$sig + prop_sig$Freq
+lnc_temp = aggregate(prop_sig[prop_sig$type=="lncRNA",]$total,by=list(prop_sig[prop_sig$type=="lncRNA",]$cancer),FUN=sum)
+pcg_temp = aggregate(prop_sig[prop_sig$type!="lncRNA",]$total,by=list(prop_sig[prop_sig$type!="lncRNA",]$cancer),FUN=sum)
+prop_sig$type_sum = c(lnc_temp$x,pcg_temp$x,lnc_temp$x,pcg_temp$x)
+
+#proportion is out of the total number of genes in cnv regions 
+prop_sig$prop = prop_sig$sig/prop_sig$type_sum
+
+#proportion is based on the cnv type 
+prop_sig$prop = prop_sig$sig/prop_sig$total
+
+prop_sig$type = factor(prop_sig$type,levels=c("protein_coding","lncRNA"))
+prop_sig$cancer = factor(prop_sig$cancer,levels=c("BALL","AML","WT","NBL"))
+prop_sig$cancer_num = paste(prop_sig$cancer,"\n(",prop_sig$total,")",sep="")
+
+prop_sig = prop_sig[c(2,1,4,3,6,5,8,7,10,9,12,11,14,13,16,15),]
+prop_sig$cancer_num = factor(prop_sig$cancer_num,levels=prop_sig$cancer_num)
+
+aa = ggplot(prop_sig, aes(prop_sig$cancer_num,prop_sig$prop, fill = prop_sig$CNV_type)) + geom_bar(position = "stack", stat = "identity") + facet_wrap( ~ CNV_type + type,scales="free_x")+xlab("")+ylab("Proportion of CNV genes with significant expression dysregulated\n")+scale_fill_manual(values= c("red","blue"),name="CNV Type")+xlab("\n# CNV genes per cancer")+geom_text(aes(label=sig),vjust=0,hjust=0)
+aa = aa+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"))
+aa =aa+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"),)
+aa
+
+pdf("Prop_Genes_Dys_CNV_0920.pdf",width=10,height=10)
+aa
+dev.off()
+
+```
+
+#Figure 3b - Number of lncRNAs per chromsome and cancer with dysregulated exp due to CNV: 
+
+```{r}
+#plot the number of samples with CNV per cancer 
+
+exp_cnv = pantarget_cnv[pantarget_cnv$V14=="yes_high" & pantarget_cnv$V10=="lncRNA",]
+
+#cancer label column
+exp_cnv$V11 = factor(exp_cnv$V11,levels=c("AML","WT","BALL","NBL"))
+
+#chr column
+exp_cnv$V9 = gsub("chr","",exp_cnv$V9)
+
+exp_cnv$V9 = factor(exp_cnv$V9,levels=c("1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","X","Y"))
+
+qq = ggplot(exp_cnv,aes(exp_cnv$V9,fill=exp_cnv$V11))+geom_bar()+xlab("\nchr")+ylab("# of genes with sig. dysregulated expression \n")+scale_fill_discrete(name="Cancer")+scale_y_continuous(expand = c(0,0) )
+qq = qq+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"))
+qq =qq+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"),legend.position = c(0.9,0.9))
+print(qq)
+
+
+pdf("Freq_DysGenes_Chr_PanTarget.pdf",width=12)
+qq
+dev.off()
+
+```
+
+
+# Supplementary Figure 3a - copy number plot per cancer 
+
+```{r}
+#plot the segment files using Gonzalos package 
+library(svpluscnv)
+
+nbl_seg= read.table("../Data/TARGET/CNV_SV_Data/CNV_segmentation_files/NBL_pantarget.seg")
+nbl_seg$V1 = str_sub(nbl_seg$V1,11,16)
+cnv <- validate.cnv(nbl_seg)
+
+pdf("NBL_CNV_Seg_Plot.pdf",width=10,height=5)
+cnv_freq <- cnv.freq(cnv, fc.pct = 0.2, ploidy = FALSE, plot=TRUE)
+dev.off()
+
+aml_seg= read.table("../Data/TARGET/CNV_SV_Data/CNV_segmentation_files/AML_pantarget.seg")
+aml_seg$V1 = str_sub(aml_seg$V1,11,16)
+cnv <- validate.cnv(aml_seg)
+
+pdf("AML_CNV_Seg_Plot.pdf",width=10,height=5)
+cnv_freq <- cnv.freq(cnv, fc.pct = 0.2, ploidy = FALSE, plot=TRUE)
+dev.off()
+
+wt_seg= read.table("../Data/TARGET/CNV_SV_Data/CNV_segmentation_files/WT_pantarget.seg")
+wt_seg$V1 = str_sub(wt_seg$V1,11,16)
+cnv <- validate.cnv(wt_seg)
+
+pdf("WT_CNV_Seg_Plot.pdf",width=10,height = 5)
+cnv_freq <- cnv.freq(cnv, fc.pct = 0.2, ploidy = FALSE, plot=TRUE)
+dev.off()
+
+ball_seg= read.table("../Data/TARGET/CNV_SV_Data/CNV_segmentation_files/BALL_pantarget.seg")
+ball_seg$V1 = str_sub(ball_seg$V1,11,16)
+ball_seg$V1 = as.character(ball_seg$V1)
+cnv <- validate.cnv(ball_seg)
+
+pdf("BALL_CNV_Seg_Plot_0820.pdf",width=10,height=5)
+cnv_freq <- cnv.freq(cnv, fc.pct = 0.2, ploidy = FALSE, plot=TRUE)
+dev.off()
+
+```
+
+# Supplementary Figure 3b - plot the log2 fold change of gene expression of genes in SCNA loci across cancers 
+
+```{r}
+#Figure 3 - plot of lncRNA copy number
+library(dplyr)
+
+cnv_results = pantarget_cnv
+
+#cancer here is the expression matrix with the related cancer name 
+
+cancer = WT
+cancer_name = "WT"
+cnv_results_cancer = cnv_results[cnv_results$cancer==cancer_name,c(2,7:9,12,13,16,17)]
+
+cancer = AML
+cancer_name = "AML"
+cnv_results_cancer = cnv_results[cnv_results$cancer==cancer_name,c(2,7:9,12,13,16,17)]
+
+cancer = BALL
+cancer_name = "BALL"
+cnv_results_cancer = cnv_results[cnv_results$cancer==cancer_name,c(2,7:9,12,13,16,17)]
+
+
+cancer = NBL
+cancer_name = "NBL"
+cnv_results_cancer = cnv_results[cnv_results$cancer==cancer_name,c(2,7:9,12,13,16,17)]
+
+cnv_degene_plot()
+
+cnv_degene_plot=function(cancer,cancer_name,cnv_results_cancer){
+  
+  #same code per cancer, just change the amp/del parameters as shown above 
+  cnv_results_cancer = cnv_results_cancer[cnv_results_cancer$gene%in%exp_cutoff_genes_lnc$V1,]
+  cnv_results_cancer  = cnv_results_cancer[order(abs(cnv_results_cancer$fold_change),decreasing = T),]
+  cnv_results_cancer$rank = 0
+  cnv_results_cancer$sig = cnv_results_cancer$sig_new
+  cnv_results_cancer[cnv_results_cancer$sig=="yes_high",] = cnv_results_cancer[cnv_results_cancer$sig=="yes_high",] %>%group_by(X2) %>% mutate(rank=row_number())
+  cnv_results_cancer$X2 = NULL
+  chr_keep =table(as.character(cnv_results_cancer$chr))
+  chr_keep_sig = table(cnv_results_cancer[cnv_results_cancer$sig=="yes_high",]$chr)
+  cancer_lnc = genes_anno[rownames(cancer[rownames(cancer)%in%exp_cutoff_genes_lnc$V1,]),]
+  cancer_lnc = cancer_lnc[!(cancer_lnc$V1%in%cnv_results_cancer$gene),]
+  cancer_lnc = cancer_lnc[,c(1,4,5)]
+  colnames(cancer_lnc) = c("gene","gene_name","chr")
+  cancer_lnc$fold_change = 0  
+  cancer_lnc$sig = "None"
+  cancer_lnc$CNV_type  = "None"
+  cancer_lnc$rank = 0
+  cancer_lnc$sig_new = "None"
+  cnv_results_cancer = rbind(cnv_results_cancer,cancer_lnc)
+  
+  cnv_results_cancer$start_pos = genes_anno[as.character(cnv_results_cancer$gene),6]
+  cnv_results_cancer = cnv_results_cancer[order(cnv_results_cancer$start_pos),]
+  cnv_results_cancer$chr_num = gsub("chr","",cnv_results_cancer$chr)
+  cnv_results_cancer$chr_num = factor(cnv_results_cancer$chr_num,levels=c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,"X"))
+  
+  
+  cnv_results_cancer = cnv_results_cancer[order(cnv_results_cancer$chr_num),]
+  
+  cnv_results_cancer$chr_pos = paste(cnv_results_cancer$chr_num,cnv_results_cancer$start_pos,sep=":")
+  chr_pos_levels = cnv_results_cancer$chr_pos[!duplicated(cnv_results_cancer$chr_pos)]
+  cnv_results_cancer$chr_pos = factor(cnv_results_cancer$chr_pos,levels=chr_pos_levels)
+  cnv_results_cancer$sig = as.character(cnv_results_cancer$sig)
+  cnv_results_cancer$CNV_type = as.character(cnv_results_cancer$CNV_type)
+  cnv_results_cancer[cnv_results_cancer$sig=="No",]$sig = cnv_results_cancer[cnv_results_cancer$sig=="No",]$CNV_type
+  cnv_results_cancer = cnv_results_cancer[cnv_results_cancer$chr%in%names(chr_keep),]
+  
+  cnv_results_cancer$chr_name1 = chr_keep[as.character(cnv_results_cancer$chr)]
+  cnv_results_cancer$chr_name2 = chr_keep_sig[as.character(cnv_results_cancer$chr)]
+  cnv_results_cancer$chr_name_new = paste(cnv_results_cancer$chr_name2,cnv_results_cancer$chr_name1,sep=" | ")
+  cnv_results_cancer$chr_name_new = paste(cnv_results_cancer$chr,cnv_results_cancer$chr_name_new,sep="\n")
+  
+  cnv_results_cancer$chr_name_new = factor(cnv_results_cancer$chr_name_new,levels=unique(cnv_results_cancer$chr_name_new))
+  
+  
+  qq = ggplot(cnv_results_cancer,aes(chr_pos,fold_change,color=sig_new))+geom_point()+xlab("")+ylab("log2 fold change\n")+scale_color_manual(values=c("red","blue","green","dark green","black"))+facet_grid(.~chr_name_new,scales = 'free_x')
+  qq = qq+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_rect(fill = NA, color = "black"), axis.line = element_line(colour = "black"),panel.spacing.x=unit(0, "lines"))
+  qq =qq+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"),axis.text.x = element_blank(),legend.position = "None")+coord_cartesian(clip = "off")
+  
+  
+  pdf(paste(cancer_name,"_SCNA_DELnc_Plot_Test.pdf",sep=""),width=20,height=4)
+  qq
+  dev.off()
+
+}
+
+
+```
+

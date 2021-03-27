@@ -1,0 +1,1004 @@
+---
+title: "Figure 5 and Supplementary Figure 6 Generation"
+output: html_notebook
+---
+
+#Gene annotation and expression matrix data: 
+
+```{r}
+
+#loads the gene annotation files used in this study
+
+#genes_anno - all genes considered and their position, gene type, locus etc - Data associated with Supplementary Table 2
+#protein,non_coding - subset of genes_anno based on gene_type
+#all_genes_cancer,exp_cutoff_genes - gene annotation for genes that pass filtering threshold (at least 1 FPKM in 20% of samples)
+
+load("../Data/TARGET/PanCancer_lncRNA_AnnotationFiles_030121.rda")
+
+
+#loads the expression matrix (fpkm) for all samples used in this study 
+
+#fpkm - total expression matrix of all samples and alll genes 
+#fpkm_list - list of dataframes with each cancer gene exp matrix after filtering out low exp genes
+
+load("../Data/TARGET/PanCancer_lncRNA_ExpFiles_030121.rda")
+
+```
+
+#Goal is to perform signature analysis in NBL to stratify samples into MES and ADRN groups. We use the GVSA method. The following runs the signature and outputs a table of MES/ADRN scores per NBL sample and table with lncRNAs correlated with each score in the sample. 
+
+```{r}
+
+#GSVA 
+library(GSVA)
+library(GSEABase)
+library(dplyr)
+library(reshape2)
+
+#load text file with list of genes associated with each gene set. These gene lists came from the publication: Neuroblastoma is composed of two super-enhancer-associated differentiation states. 
+
+mes_genes = read.table("../Data/TARGET/Epigenetic/MES_Genes.txt")
+adrn_genes = read.table("../Data/TARGET/Epigenetic/ADRN_Genes.txt")
+
+all_genesets = list(mes=mes_genes$V1,adrn=adrn_genes$V1)
+
+#NBL
+
+NBL$gene = genes_anno[rownames(NBL),4]
+
+temp = aggregate(. ~ NBL$gene, data=NBL[,1:161], FUN=sum)
+rownames(temp) = temp$`NBL$gene`
+temp$`NBL$gene` = NULL
+NBL = temp
+NBL = data.matrix(NBL)
+
+
+#we only want to consider HR samples (incl MYCN amp samples)
+
+metaData = data.frame(colnames(fpkm_list[[6]]))
+metaData$short = substr(metaData[,1],1,16)
+NBL_clinical = read.csv("../Data/TARGET/Clinical/TARGET_NBL_ClinicalData_20151124.csv")
+NBL_clinical$TARGET.USI = gsub("-","\\.",NBL_clinical$TARGET.USI)
+rownames(NBL_clinical) = NBL_clinical$TARGET.USI
+metaData$mycn = NBL_clinical[as.character(metaData$short),]$MYCN.status
+metaData$stage = NBL_clinical[as.character(metaData$short),]$INSS.Stage
+metaData = metaData[metaData$stage == "Stage 4",]
+#metaData = metaData[metaData$mycn != "Amplified",]
+
+NBL = NBL[,colnames(NBL)%in%metaData[,1]] #130 samples
+
+gsva_es_nbl = gsva(NBL,all_genesets,method="gsva",kcdf="Poisson",verbose=T)
+gsva_es_nbl = data.frame(t(gsva_es_nbl))
+
+plot(gsva_es_nbl$mes,gsva_es_nbl$adrn)
+
+#correlate MES/ADRN score with lncRNA expression in NBL - determine if any lncRNAs are more associated with one or the other and plot heatmap as such
+ 
+NBL= fpkm_list[[6]]
+NBL = NBL[,colnames(NBL)%in%rownames(gsva_es_nbl)]
+NBL_lnc = NBL[rownames(NBL)%in%rownames(noncoding),]
+NBL_lnc = NBL_lnc[rownames(NBL_lnc)%in%exp_cutoff_genes_lnc$V1,]
+
+gsva_es_nbl$NOTCH_exp = NULL
+gsva_es_nbl$cell_type = NULL
+gsva_es_nbl$groups = NULL
+nbl_sign_cor  = data.frame(t(gsva_es_nbl))
+nbl_sign_cor$samples = rownames(nbl_sign_cor)
+nbl_sign_cor = melt(nbl_sign_cor)
+NBL_lnc$samples = rownames(NBL_lnc)
+colnames(nbl_sign_cor) = c("variable","samples","value")
+temp = melt(NBL_lnc)
+colnames(temp) = c("gene","samples","value")
+nbl_sign_cor = merge(nbl_sign_cor,temp,by="samples")
+colnames(nbl_sign_cor)= c("name","geneset","score","gene","value")
+nbl_sign_cor$score= as.numeric(as.character(nbl_sign_cor$score))
+results = nbl_sign_cor %>% group_by(geneset,gene) %>% summarize(cor.test(score,value,method="spearman")$estimate)
+pvalue = nbl_sign_cor %>% group_by(geneset,gene) %>% summarize(cor.test(score,value,method="spearman")$p.value)
+results$pvalue = pvalue$`cor.test(score, value, method = "spearman")$p.value`
+results$gene_name = genes_anno[as.character(results$gene),4]
+results$chr = genes_anno[as.character(results$gene),5]
+
+results_nbl = results
+rm(nbl_sign_cor)
+
+#abitrary correlation cut off - abs(0.6)
+
+results = data.frame(results)
+results_hc = results[abs(results[,3])>=0.6,] #69 genes, 50 nondup
+results_hc = results_hc[!(is.na(results_hc[,3])),]
+results_hc_opp = results_hc[results_hc$gene%in%results_hc[duplicated(results_hc$gene),]$gene,]
+
+results_nbl$adj_pval = p.adjust(results_nbl$pvalue,method="BH")
+results_hc = results_nbl[abs(results_nbl[,3])>=0.6,]
+
+colnames(results) = c("geneset","gene","spear_corr","gene_name","chr")
+
+#save(gsva_es_nbl,results_nbl,file="TARGET_MES_ADRN_NBL_Score_Stage4Amp.rda")
+
+#run the above again but add the line NBL_lnc = NBL this will give you all gene results (including proteins)
+
+results = results[results$geneset=="mes" | results$geneset == "adrn",]
+results_all_protein = results
+rm(results)
+results_all_protein_sig = results_all_protein[abs(results_all_protein[,3])>0.5,]
+
+#save(results_all_protein,results_nbl,file = "NBL_Stage4_Amp_GeneCorr_Results.rda") #protein results - need this for gene set enrichment later 
+
+```
+
+#Figurer 5a and Supplementary Figure 6a - Heatmap of lncRNAs associated with MES or ADRN group of samples. Clustering determined which groups the samples belong to. Then we plot the scores of samples colored by the grouping determined from expression clustering. Figure 5b - the top correlated lncRNAs with either the MES or ADRN score. 
+
+```{r}
+
+#heatmap of the score vs expression of the genes in each of the signatures 
+library(ggplot2)
+library(pheatmap)
+
+mes_genes = read.table("../Data/TARGET/Epigenetic/MES_Genes.txt",stringsAsFactors = F)
+adrn_genes = read.table("../Data/TARGET/Epigenetic/ADRN_Genes.txt",stringsAsFactors = F)
+
+load("TARGET_MES_ADRN_NBL_Score_Stage4Amp.rda") #include sample groups
+
+NBL = fpkm_list[[6]]
+NBL_lineage = NBL[rownames(NBL)%in%genes_anno[genes_anno$V4%in%c(mes_genes$V1,adrn_genes$V1),1],]
+NBL_lineage = NBL_lineage[,colnames(NBL_lineage)%in%rownames(gsva_es_nbl)]
+NBL_lineage = as.data.frame(t(scale(t(log2(NBL_lineage+1)), center=T, scale=F)))
+
+metaData = data.frame(colnames(NBL_lineage))
+metaData$short = substr(metaData[,1],11,16)
+metaData$MES_score = gsva_es_nbl[as.character(metaData[,1]),1]
+metaData$ADRN_score = gsva_es_nbl[as.character(metaData[,1]),2]
+rownames(metaData) = metaData$colnames.NBL_lineage.
+metaData$colnames.NBL_lineage. = NULL
+metaData$short = NULL
+metaData = metaData[colnames(NBL_lineage),]
+metaData = metaData[order(metaData$ADRN_score),]
+metaData = metaData[order(metaData$MES_score),]
+
+NBL_lineage = NBL_lineage[,rownames(metaData)]
+
+colors = colorRampPalette(c("blue","white", "red"), space="rgb")(64)
+annocolor = list(groups= c(high = "purple", med="light yellow",low="orange"))
+
+aa = pheatmap(NBL_lineage,cluster_rows=TRUE, show_colnames= F,show_rownames=F,cluster_cols=T,border_color = FALSE,annotation_col= metaData,color=colors,annotation_colors = annocolor)
+aa
+
+# dendrogram cluster cut 
+nbl_groups = cutree(aa$tree_col, 3)
+metaData$groups = as.character(nbl_groups[rownames(metaData)])
+
+metaData$groups = as.character(metaData$groups)
+metaData$groups = factor(metaData$groups,levels=c("1","2","3"))
+
+colors = colorRampPalette(c("green","black", "red"), space="rgb")(64)
+annocolor = list(groups= c("1" = "red", "2"="dark green","3"="blue"))
+
+#SUPPLEMENTARY FIGURE 6A
+
+aa = pheatmap(NBL_lineage,cluster_rows=TRUE, show_colnames= F,show_rownames=F,cluster_cols=T,border_color = FALSE,annotation_col= metaData,color=colors,annotation_colors = annocolor)
+aa
+
+pdf("MES_ADRN_Exp_NBL_Stage4Amp.pdf",width=10)
+aa
+dev.off()
+
+#replot the point graph with the new groups 
+
+gsva_es_nbl$groups = metaData[rownames(gsva_es_nbl),]$groups
+gsva_es_nbl$groups = as.character(gsva_es_nbl$groups)
+#gsva_es_nbl[gsva_es_nbl$groups==3,]$groups = 2
+#gsva_es_nbl[gsva_es_nbl$groups==4,]$groups = 3
+
+# FIGURE 5A
+
+q = ggplot(gsva_es_nbl,aes(adrn,mes,color=groups))+geom_point()+xlab("\nADRN score")+ylab("MES\n") + ggtitle("TARGET NBL")
+q = q+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+q =q+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))+scale_color_brewer(palette="Set1",name = "Gene Types")
+q
+
+pdf("TARGET_NBL_MES_ADRN_ScoresPlot_Stage4Amp.pdf")
+q
+dev.off()
+
+
+#FIGURE 5B: 
+
+#heatmap of the sample assigned labels vs correlated lncRNAs - defining a set of high confidence/interesting lncRNAs to investigate/ reporting the total set in the supplementary data 
+
+results_hc = results_nbl[abs(results_nbl[,3])>=0.6,]
+results_hc = results_hc[!(is.na(results_hc[,3])),]
+
+NBL_lineage = NBL[rownames(NBL)%in%results_hc$gene,]
+NBL_lineage = NBL_lineage[,colnames(NBL_lineage)%in%rownames(gsva_es_nbl)]
+NBL_lineage = as.data.frame(t(scale(t(log2(NBL_lineage+1)), center=T, scale=F)))
+
+metaData = data.frame(colnames(NBL_lineage))
+metaData$short = substr(metaData[,1],11,16)
+metaData$MES_score = gsva_es_nbl[as.character(metaData[,1]),1]
+metaData$ADRN_score = gsva_es_nbl[as.character(metaData[,1]),2]
+rownames(metaData) = metaData$colnames.NBL_lineage.
+metaData$colnames.NBL_lineage. = NULL
+metaData$short = NULL
+metaData = metaData[colnames(NBL_lineage),]
+metaData = metaData[order(metaData$ADRN_score),]
+metaData = metaData[order(metaData$MES_score),]
+metaData$groups = gsva_es_nbl[rownames(metaData),3]
+metaData = metaData[order(metaData$groups),]
+NBL_lineage = NBL_lineage[,rownames(metaData)]
+rownames(NBL_lineage) = genes_anno[rownames(NBL_lineage),4]
+
+colors = colorRampPalette(c("blue","white", "red"), space="rgb")(64)
+
+aa = pheatmap(NBL_lineage,cluster_rows=TRUE, show_colnames= F,show_rownames=F,cluster_cols=T,border_color = FALSE,annotation_col= metaData,color=colors)
+aa
+
+pdf("NBL_Stage4_Amp_lncRNAexp_MES_Blue_UnClustered.pdf",width=10)
+aa
+dev.off()
+
+```
+
+# Gene set enrichment plots associated with Figure 5b. This invovles running a correlation between protein coding genes and the MES/ADRN score per sample and then determining the correlation of protein coding genes and  lncRNAs present on the same chromosome. 
+
+
+```{r}
+
+load("NBL_Stage4_Amp_GeneCorr_Results.rda") #all genes correlation with the MES/ADRN score 
+
+
+#find lncRNAs with protein on same chr and high correlation to mes or adrn 
+results_all_protein_sig$type = "protein"
+results_all_protein_sig[results_all_protein_sig$gene%in%rownames(noncoding),]$type = "lncRNA"
+results_all_protein_sig$start_pos = genes_anno[as.character(results_all_protein_sig$gene),6]
+
+#also how many of the correlated genes are just mes/adrn genes?
+results_all_protein_sig = results_all_protein_sig[order(results_all_protein_sig$start_pos),]
+results_all_protein_sig$temp = gsub("chr","",results_all_protein_sig$chr)
+results_all_protein_sig = results_all_protein_sig[order(results_all_protein_sig$temp),]
+
+#label the gene as mes or adrn associated:
+
+results_all_protein_sig$cat = "mes"
+results_all_protein_sig[results_all_protein_sig$geneset=="adrn" & results_all_protein_sig[,3]>0,]$cat = "adrn"
+results_all_protein_sig[results_all_protein_sig$geneset=="mes" & results_all_protein_sig[,3]<0,]$cat = "adrn"
+
+gene_label = results_all_protein_sig[,colnames(results_all_protein_sig)%in%c("gene","gene_name","cat")]
+gene_label =gene_label[!duplicated(gene_label),]
+rownames(gene_label) = gene_label$gene
+gene_label = data.frame(gene_label)
+
+chr_names = names(table(as.character(results_all_protein_sig[abs(results_all_protein_sig[,3])>0.6 & results_all_protein_sig$type=="lncRNA",]$chr)))
+
+all_results = list()
+
+for (chr in chr_names){
+  print(chr)
+  NBL_lnc  = NBL[rownames(NBL)%in%results_all_protein_sig[results_all_protein_sig$chr==chr & results_all_protein_sig$type=="lncRNA" & abs(results_all_protein_sig[,3])>0.6,]$gene,]
+  NBL_lnc$samples = rownames(NBL_lnc)
+  temp = melt(NBL_lnc)
+  colnames(temp) = c("gene","samples","value")
+  NBL_prot  = NBL[rownames(NBL)%in%results_all_protein_sig[results_all_protein_sig$chr==chr & results_all_protein_sig$type=="protein",]$gene,]
+  NBL_prot$samples = rownames(NBL_prot)
+  temp2 = melt(NBL_prot)
+  colnames(temp2) = c("gene","samples","value")
+  nbl_sign_cor = merge(temp,temp2,by="samples")
+  colnames(nbl_sign_cor)= c("name","geneset","score","gene","value")
+  nbl_sign_cor$score= as.numeric(as.character(nbl_sign_cor$score))
+  results = nbl_sign_cor %>% group_by(geneset,gene) %>% summarize(cor.test(score,value,method="spearman")$estimate)
+pvalue = nbl_sign_cor %>% group_by(geneset,gene) %>% summarize(cor.test(score,value,method="spearman")$p.value)
+results$pvalue = pvalue$`cor.test(score, value, method = "spearman")$p.value`
+results$lnc = genes_anno[as.character(results$geneset),4]
+results$gene_name = genes_anno[as.character(results$gene),4]
+results$chr = genes_anno[as.character(results$gene),5]
+results = results[abs(results[,3])>0.4,]
+results$lnc_type = gene_label[as.character(results$geneset),3]
+results$pro_type = gene_label[as.character(results$gene),3]
+results = data.frame(results)
+colnames(results)[3] = "spearman"
+all_results[[chr]] = results
+}
+
+all_results2 = all_results
+
+all_results = do.call("rbind", all_results)
+all_results = all_results[abs(all_results$spearman)>0.5,]
+all_results$known_mes = "no"
+all_results$known_adrn = "no"
+all_results[all_results$gene_name%in%adrn_genes$V1,]$known_adrn = "yes"
+all_results[all_results$gene_name%in%mes_genes$V1,]$known_mes = "yes"
+all_results$label = paste(all_results$lnc_type,all_results$pro_type,sep="_")
+
+
+#now perform gene set enrichment on the correlated protein coding genes to get a sense of exactly what pathways the lncs may be involved
+
+#load the fisher exact test function first
+
+load("MSigDB_v5.0_human.rda") #Msigdb analysis: - load the gene sets - you can download this from MSigDB
+
+#Functions created by Gonalazo to perform gene set enrichment using Fisher's Exact Test: 
+fet=function(a,b,tot=NULL,alternative='t'){
+## a =vector a
+## b = vector b
+## tot = background list
+## alternative 't' = two-sided; 'g'=greater; 'l'=less
+if(is.null(tot)) {
+tot <- unique(c(a,b))
+warning("No background list provided; a+b-(ab) used as background")
+}
+common <- length(intersect(intersect(a,b),tot))
+#print(common)
+na <- length(intersect(setdiff(a,intersect(a,b)),tot))
+nb <- length(intersect(setdiff(b,intersect(a,b)),tot))
+rest<- length(tot) - na - nb - common
+#print(common)
+#print(na)
+#print(nb)
+#print(rest)
+res <- fisher.test(matrix(c(common,na,nb,rest),2,2),alternative=alternative)
+return(list(p.value=res$p.value,oddsr=res$estimate,call=matrix(c(common,na,nb,rest),2,2)))
+}
+
+multi_fet <- function(set, collection, tot=NULL){
+count =0
+#set a vector containing gene names
+#collection a list containing multiple pathway related gene sets
+#background gene list (by default combines genes n the collection)
+if(is.null(tot)) tot <- unique(unlist(collection))
+res<-list()
+for(i in names(collection)){
+f <- fet(set,collection[[i]],tot)
+#print(f)
+res[[i]] <- c(f$p.value,f$oddsr, as.numeric(f$call))
+}
+ret <- data.frame(do.call(rbind,res))
+fdr <- p.adjust(ret[,1],method="fdr")
+ret <- cbind(fdr,ret)
+colnames(ret) <- c("FDR","fet","OddsR","AB","BB","AA","tot")
+return(ret[order(ret[,2]),])
+}
+
+background = genes_anno[rownames(NBL),4] #all genes expressed in NBL
+collection=msigDBsymbol$c5.bp.v5.0.symbols.gmt
+
+geneset = all_results[all_results$lnc_type=="mes" & all_results$pro_type=="mes",]$gene_name
+MSigDB_results_mes = multi_fet(geneset,collection,background)
+
+
+MSigDB_results_mes$log = -log10(MSigDB_results_mes$FDR)
+MSigDB_results_mes$name = rownames(MSigDB_results_mes)
+MSigDB_results_mes = MSigDB_results_mes[order(MSigDB_results_mes$FDR,decreasing = T),]
+MSigDB_results_mes$name = factor(MSigDB_results_mes$name,levels=MSigDB_results_mes$name)
+
+yy = ggplot(MSigDB_results_mes[820:825,],aes(log,name))+geom_bar(stat = "identity")+xlab("")+ylab("")
+yy = yy+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+yy =yy+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))
+yy
+
+pdf("Stage4Amp_MES_lnc_Pathway.pdf",width=15)
+yy
+dev.off()
+
+geneset = all_results[all_results$lnc_type=="adrn" & all_results$pro_type=="adrn",]$gene_name
+MSigDB_results_adrn = multi_fet(geneset,collection,background)
+
+MSigDB_results_adrn$log = -log10(MSigDB_results_adrn$FDR)
+MSigDB_results_adrn$name = rownames(MSigDB_results_adrn)
+MSigDB_results_adrn = MSigDB_results_adrn[order(MSigDB_results_adrn$FDR,decreasing = T),]
+MSigDB_results_adrn$name = factor(MSigDB_results_adrn$name,levels=MSigDB_results_adrn$name)
+MSigDB_results_adrn$name = gsub("NUCLEOBASENUCLEOSIDENUCLEOTIDE_AND_NUCLEIC_ACID_METABOLIC_PROCESS","NUCLEIC_ACID_METABOLIC_PROCESS",MSigDB_results_adrn$name)
+MSigDB_results_adrn$name = factor(MSigDB_results_adrn$name,levels=MSigDB_results_adrn$name)
+
+yy = ggplot(MSigDB_results_adrn[820:825,],aes(log,name))+geom_bar(stat = "identity")+xlab("")+ylab("")
+yy = yy+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+yy =yy+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))
+yy
+
+pdf("Stage4Amp_ADRN_lnc_Pathway.pdf",width=15)
+yy
+dev.off()
+
+
+```
+
+#Figure 5d-e - Perform differential expression of MES and ADRN samples lncRNA expression, Stage 4 Amp+ Results Files - Perform DE between ADRN/MES groups?
+
+```{r}
+
+load("TARGET_MES_ADRN_NBL_Score_Stage4Amp.rda") #include sample groups
+
+NBL_lnc = NBL[rownames(NBL)%in%noncoding[noncoding$conf=="high",1],]
+
+load("~/Dropbox/ApexaFiles/PanTarget_Paper/PanTarget_Paper_General_Data/PanTarget_StringTie_Count_Gene_Level_121819.rda")
+rownames(count) = count$genes
+count$genes = NULL
+#for the count - sum across lncipedia genes that appear to be transcripts of a gene: 
+lncipedia = count[grep("lnc.",rownames(count)),]
+temp = rownames(lncipedia)
+temp = gsub("lnc-","",temp)
+temp = gsub('.{2}$', '', temp)
+temp[str_sub(temp,-1)=="-"] = str_sub(temp[str_sub(temp,-1)=="-"],1,-2)
+temp = paste("lnc",temp,sep="-")
+lncipedia$short_name = temp
+lncipedia2 = aggregate(. ~ lncipedia$short_name, data=lncipedia[,1:1123], FUN=sum)
+rownames(lncipedia2) = lncipedia2[,1]
+lncipedia2[,1] = NULL
+
+count = count[grep("lnc-",rownames(count),invert=T),]
+count = rbind(count,lncipedia2)
+
+count = count[rownames(count)%in%rownames(NBL),]
+
+count = count[,grep("TARGET.30",colnames(count))]
+count = count[,colnames(count)%in%rownames(gsva_es_nbl)]
+
+count_lnc = count[rownames(count)%in%noncoding[noncoding$conf=="high",1],]
+
+metaData_count = data.frame(colnames(count))
+metaData_count$groups = gsva_es_nbl[as.character(metaData_count[,1]),]$groups
+metaData_count$groups = gsub(1,"ADRN",metaData_count$groups)
+metaData_count$groups = gsub(2,"Mixed",metaData_count$groups)
+metaData_count$groups = gsub(3,"MES",metaData_count$groups)
+
+metaData_count = metaData_count[metaData_count$groups!="Mixed",]
+rownames(metaData_count) = metaData_count[,1]
+count = count[,colnames(count)%in%metaData_count[,1]]
+
+library(DESeq2)
+
+dds=DESeqDataSetFromMatrix(countData=count,colData=metaData_count,design=~groups)
+dds=DESeq(dds,parallel = T,BPPARAM=MulticoreParam(10))
+#res_stage=results(dds_stage,cooksCutoff=F, contrast = c("Vital_Status","Dead", "Alive"))
+res_stage=results(dds,cooksCutoff=T,contrast = c("groups","ADRN", "MES"))
+res_stage = data.frame(res_stage)
+res_stage$gene_name = genes_anno[rownames(res_stage),4]
+
+res_stage_sig = res_stage[res_stage$padj<0.1,]
+res_stage_sig = res_stage_sig[abs(res_stage_sig$log2FoldChange)>0.58,]
+
+res_stage_lnc = res_stage[rownames(res_stage)%in%noncoding[noncoding$conf=="high",1],]
+res_stage_lnc = res_stage_lnc[res_stage_lnc$padj<0.1,]
+res_stage_lnc = res_stage_lnc[abs(res_stage_lnc$log2FoldChange)>0.58,]
+
+res_stage_lnc = res_stage[rownames(res_stage)%in%noncoding[noncoding$conf=="high",1],]
+
+#convert lnci names
+
+genes_anno_new = read.table("GeneAnnotation_noLnci.txt")
+lncRNA_new = genes_anno_new[grep("lncRNA",genes_anno_new$V3),]
+lncRNA_new = lncRNA_new[,c(1,10)]
+rownames(lncRNA_new) = lncRNA_new$V10
+
+res_stage_lnc$gene_name = as.character(res_stage_lnc$gene_name)
+
+names=  as.character(res_stage_lnc[grep("lnc-",rownames(res_stage_lnc)),]$gene_name)
+res_stage_lnc[grep("lnc-",rownames(res_stage_lnc)),]$gene_name = as.character(lncRNA_new[names,1])
+
+res_stage_lnc$gene = rownames(res_stage_lnc)
+
+res_stage_lnc[grep("lnc-",rownames(res_stage_lnc)),]$gene = as.character(lncRNA_new[names,1])
+
+rownames(res_stage_lnc) = res_stage_lnc$gene
+res_stage_lnc$gene = NULL
+
+#save(res_stage,file ="MES_ARDN_DESeq2_Results.rda")
+
+#write.table(res_stage_lnc,"MES_ARDN_DESeq2_AlllncRNA_SigResults.txt",quote=F,sep="\t")
+
+#plot any gene comparison between ADRN/MES samples 
+
+gene = "ENSG00000109132.5"
+gene = "ENSG00000204376.7"
+
+ggplot(metaData_count,aes(groups,log2(gene+1)))+geom_boxplot()
+
+gene = "ENSG00000267280.1" #TBX2-AS1
+metaData_count$tbx2_as1 = t(NBL[gene,rownames(metaData_count)])
+
+gene = "ENSG00000121068.9" # TBX2
+metaData_count$tbx2 = t(NBL[gene,rownames(metaData_count)])
+
+
+metaData_count_tbx2 = melt(metaData_count)
+metaData_count_tbx2$variable = factor(metaData_count_tbx2$variable,levels=c("tbx2","tbx2_as1"))
+
+x = ggplot(metaData_count_tbx2,aes(groups,value,fill=variable))+geom_boxplot()+xlab("")+ylab("FPKM\n")
+x = x+theme_classic()+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+#change fonts and colors of the axes
+x =x+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))
+x
+
+pdf("TBX2_TBX2AS1_ADRNMES_Exp.pdf")
+x
+dev.off()
+
+#how many DE  lncs overlap with ADRN (CRC) reg lncs 
+
+NBL_core_genes = read.table("../Data/TARGET/NBL_Core_Associated_Genes_0420.txt",stringsAsFactors = F)
+
+NBL_core_genes_lnc = NBL_core_genes[NBL_core_genes$V1%in%rownames(noncoding[noncoding$conf=="high",]),]
+
+intersect(rownames(res_stage_lnc),NBL_core_genes_lnc) #313 out of 547
+
+#load the correlation results and see how they overlap 
+
+load("NBL_Stage4_Amp_GeneCorr_Results.rda")
+
+results_nbl_hc  = results_nbl[abs(results_nbl[,3])>0.6,]
+
+#mes lncs 
+results_nbl_hc = rbind(results_nbl_hc[results_nbl_hc$geneset=="mes" & results_nbl_hc[,3]>0,],results_nbl_hc[results_nbl_hc$geneset=="adrn" & results_nbl_hc[,3]<0,])
+
+intersect(results_nbl_hc$gene,rownames(res_stage_lnc)) #29
+
+res_stage_lnc_mes = res_stage_lnc[res_stage_lnc$log2FoldChange<0,]
+res_stage_lnc_mes$cor = "no"
+res_stage_lnc_mes[rownames(res_stage_lnc_mes)%in%results_nbl_hc$gene,]$cor = "yes"
+
+ggplot(res_stage_lnc_mes,aes(abs(log2FoldChange),color=cor))+geom_density()
+
+ggplot(res_stage_lnc_mes,aes(cor,abs(log2FoldChange)))+geom_boxplot()
+
+#plot either the top 25 per type for the DE genes? 
+
+#filter DE ADRN based on CRC genes 
+
+#finish the figure and send to sharon with the updates
+
+intersect(results_nbl_hc$gene,rownames(res_stage_lnc_top)) #21
+
+#make a heatmap with only the top lncs per phenotype 
+res_stage_lnc_top = res_stage_lnc[abs(res_stage_lnc$log2FoldChange)>1.5,]
+res_stage_lnc_top = res_stage_lnc_top[rownames(res_stage_lnc_top)%in%rownames(noncoding),]
+
+library(pheatmap)
+
+NBL = fpkm_list[[6]]
+NBL_lineage = NBL[rownames(NBL)%in%rownames(res_stage_lnc_top),]
+NBL_lineage = NBL_lineage[,colnames(NBL_lineage)%in%rownames(gsva_es_nbl)]
+NBL_lineage = NBL_lineage[,colnames(NBL_lineage)%in%rownames(metaData_count)]
+NBL_lineage = as.data.frame(t(scale(t(log2(NBL_lineage+1)), center=T, scale=F)))
+
+metaData = data.frame(colnames(NBL_lineage))
+metaData$short = substr(metaData[,1],11,16)
+metaData$MES_score = gsva_es_nbl[as.character(metaData[,1]),1]
+metaData$ADRN_score = gsva_es_nbl[as.character(metaData[,1]),2]
+metaData$group = gsva_es_nbl[as.character(metaData[,1]),3]
+rownames(metaData) = metaData$colnames.NBL_lineage.
+metaData$colnames.NBL_lineage. = NULL
+metaData$short = NULL
+metaData = metaData[colnames(NBL_lineage),]
+metaData = metaData[order(metaData$ADRN_score),]
+metaData = metaData[order(metaData$MES_score),]
+
+NBL_lineage = NBL_lineage[,rownames(metaData)]
+
+colors = colorRampPalette(c("blue","white", "red"), space="rgb")(64)
+annocolor = list(groups= c(high = "purple", med="light yellow",low="orange"))
+
+aa = pheatmap(NBL_lineage,cluster_rows=TRUE, show_colnames= F,show_rownames=F,cluster_cols=T,border_color = FALSE,annotation_col= metaData,color=colors,annotation_colors = annocolor)
+aa
+
+aa = pheatmap(NBL_lineage,cluster_rows=TRUE, show_colnames= F,show_rownames=F,cluster_cols=F,border_color = FALSE,annotation_col= metaData,color=colors,annotation_colors = annocolor)
+aa
+
+
+pdf("MES_ADRN_DESeq2_NBL_Stage4Amp.pdf",width=10)
+aa
+dev.off()
+
+```
+
+
+
+#Supplementart Figure 6b-c - Perform gene signature analysis in GMKF as a validation. 
+
+```{r}
+
+library(dplyr)
+load("../Data/GMKF/NBL_GMKF_stringtie_FPKM.rda")
+gmkf = samples
+rm(samples)
+gmkf$gene = trans_length[as.character(gmkf$transcript),]$Gene
+
+gmkf = gmkf[,!(colnames(gmkf)%in%c("chr","start","stop","transcript"))]
+
+gmkf_gene = gmkf%>%group_by(gene)%>% summarise_if(is.numeric, funs(sum))
+
+gmkf_gene  = as.data.frame(gmkf_gene)
+rownames(gmkf_gene) =gmkf_gene$gene
+gmkf_gene$gene = NULL
+
+gmkf_gene = gmkf_gene[,!(colnames(gmkf_gene)%in%c("GMKF.30.PAUPKS03.01B.99R.Aligned.txt"))]
+
+gmkf_gene = gmkf_gene[rownames(gmkf_gene)%in%genes_anno$V1,]
+
+gmkf_gene2_ori = gmkf_gene
+
+
+gmkf_gene2 = gmkf_gene[rowSums(gmkf_gene)>0,]
+quant = apply(gmkf_gene2,1,function(x) quantile(x,c(.80)))
+quant = quant[quant>1]
+gmkf_gene2 = gmkf_gene2[names(quant),]
+
+#subset based on high risk 
+
+clinical = read.csv("../Data/GMKF/GMKF_Clin_all_samples_ZV.csv")
+head(clinical)
+
+temp_names = data.frame(colnames(gmkf_gene))
+temp_names$short = gsub("GMKF.30.","",temp_names[,1])
+temp_names$short = gsub(".01......Aligned.txt","",temp_names$short)
+temp_names$short = gsub(".01.....Aligned.txt","",temp_names$short)
+temp_names$short = gsub("03","",temp_names$short)
+
+clinical  = clinical[clinical$usi%in%temp_names$short,]
+
+gmkf_hr = clinical[clinical$inss_stage%in%c("Stage 4"),] #67 samples
+rownames(clinical) = clinical$usi
+
+gmkf_gene_hr = gmkf_gene2[,colnames(gmkf_gene2)%in%temp_names[temp_names$short%in%gmkf_hr$usi,1]]
+
+#load text file with list of genes associated with each gene set 
+
+mes_genes = read.table("../Data/TARGET/Epigenetic/MES_Genes.txt")
+adrn_genes = read.table("../Data/TARGET/Epigenetic/ADRN_Genes.txt")
+
+all_genesets = list(mes=mes_genes$V1,adrn=adrn_genes$V1)
+
+#high risk version:
+gsva_es_gmkf = gsva(gmkf_gene_hr,all_genesets,method="gsva",kcdf="Poisson",verbose=T)
+gsva_es_gmkf = data.frame(t(gsva_es_gmkf))
+
+#plot the heatmap to determine the sample groups 
+
+gmkf_gene = gmkf_gene[rowSums(gmkf_gene)>0,]
+quant = apply(gmkf_gene,1,function(x) quantile(x,c(.80)))
+quant = quant[quant>1]
+gmkf_gene = gmkf_gene[names(quant),]
+
+gmkf_lineage = gmkf_gene[rownames(gmkf_gene)%in%genes_anno[genes_anno$V4%in%c(as.character(mes_genes$V1),as.character(adrn_genes$V1)),1],]
+
+gmkf_lineage = as.data.frame(t(scale(t(log2(gmkf_lineage+1)), center=T, scale=F)))
+
+metaData = data.frame(colnames(gmkf_lineage))
+metaData$short = substr(metaData[,1],11,16)
+metaData$MES_score = gsva_es_gmkf[as.character(metaData[,1]),1]
+metaData$ADRN_score = gsva_es_gmkf[as.character(metaData[,1]),2]
+rownames(metaData) = metaData$colnames.gmkf_lineage.
+metaData$colnames.gmkf_lineage. = NULL
+metaData$short = NULL
+metaData = metaData[colnames(gmkf_lineage),]
+metaData = metaData[order(metaData$ADRN_score),]
+metaData = metaData[order(metaData$MES_score),]
+
+clinical = read.csv("../Data/GMKF_Clin_all_samples_ZV.csv")
+
+metaData$short = gsub("GMKF.30.","",rownames(metaData))
+metaData$short = gsub(".01......Aligned.txt","",metaData$short)
+metaData$short = gsub(".01.....Aligned.txt","",metaData$short)
+metaData$short = gsub("03","",metaData$short)
+
+clinical  = clinical[clinical$usi%in%metaData$short,]
+rownames(clinical) = clinical$usi
+
+metaData$stage = clinical[as.character(metaData$short),]$inss_stage
+metaData$mycn = clinical[as.character(metaData$short),]$mycn_status
+metaData$short = NULL
+
+gmkf_lineage = gmkf_lineage[,rownames(metaData)]
+
+colors = colorRampPalette(c("blue","white", "red"), space="rgb")(64)
+annocolor = list(groups= c(high = "purple", med="light yellow",low="orange"))
+
+aa = pheatmap(gmkf_lineage,cluster_rows=TRUE, show_colnames= F,show_rownames=F,cluster_cols=T,border_color = FALSE,annotation_col= metaData,color=colors,annotation_colors = annocolor)
+aa
+
+# dendrogram cluster cut 
+gmkf_groups = cutree(aa$tree_col, 3)
+metaData$groups = gmkf_groups[rownames(metaData)]
+#metaData[metaData$groups ==2,]$groups = 1
+
+#replot the point graph with the new groups 
+
+gsva_es_gmkf$groups = metaData[rownames(gsva_es_gmkf),]$groups
+gsva_es_gmkf$groups = as.character(gsva_es_gmkf$groups)
+gsva_es_gmkf[gsva_es_gmkf$groups==3,]$groups = 2
+gsva_es_gmkf[gsva_es_gmkf$groups==4,]$groups = 3
+gsva_es_gmkf$groups = factor(gsva_es_gmkf$groups,c(2,1,3))
+
+q = ggplot(gsva_es_gmkf,aes(adrn,mes,color=groups))+geom_point()+xlab("\nADRN score")+ylab("MES\n") + ggtitle("GMKF NBL") 
+q = q+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+q =q+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))+scale_color_brewer(palette="Set1",name = "Gene Types")
+q
+
+pdf("TARGET_GMKF_MES_ADRN_ScoresPlot_Anno1.pdf")
+q
+dev.off()
+
+#correlation of the MES/ADRN with lncRNA exp
+
+gmkf_gene_lnc = gmkf_gene[rownames(gmkf_gene)%in%noncoding[noncoding$conf=="high",1],]
+
+gsva_es_gmkf$NOTCH_exp = NULL
+gsva_es_gmkf$cell_type = NULL
+gsva_es_gmkf$groups = NULL
+gmkf_sign_cor  = data.frame(t(gsva_es_gmkf))
+gmkf_sign_cor$samples = rownames(gmkf_sign_cor)
+gmkf_sign_cor = melt(gmkf_sign_cor)
+gmkf_gene_lnc$samples = rownames(gmkf_gene_lnc)
+colnames(gmkf_sign_cor) = c("variable","samples","value")
+temp = melt(gmkf_gene_lnc)
+colnames(temp) = c("gene","samples","value")
+gmkf_sign_cor = merge(gmkf_sign_cor,temp,by="samples")
+colnames(gmkf_sign_cor)= c("name","geneset","score","gene","value")
+gmkf_sign_cor$score= as.numeric(as.character(gmkf_sign_cor$score))
+results = gmkf_sign_cor %>% group_by(geneset,gene) %>% summarize(cor.test(score,value,method="spearman")$estimate)
+pvalue = gmkf_sign_cor %>% group_by(geneset,gene) %>% summarize(cor.test(score,value,method="spearman")$p.value)
+results$pvalue = pvalue$`cor.test(score, value, method = "spearman")$p.value`
+results$gene_name = genes_anno[as.character(results$gene),4]
+results$chr = genes_anno[as.character(results$gene),5]
+results_gmkf = results
+results_gmkf[,3] = as.numeric(unlist(results_gmkf[,3]))
+
+save(gsva_es_gmkf,results_gmkf,file="GMKF_MES_ADRN_Score_Stage4Amp.rda")
+
+results_gmkf_hc = results_gmkf[abs(results_gmkf[,3])>0.6,]
+
+#plot the lncRNA expression
+
+gmkf_lineage = gmkf_gene[rownames(gmkf_gene)%in%results_gmkf_hc$gene,]
+gmkf_lineage = gmkf_lineage[,colnames(gmkf_lineage)%in%colnames(gmkf_gene_hr)]
+
+gmkf_lineage = as.data.frame(t(scale(t(log2(gmkf_lineage+1)), center=T, scale=T)))
+
+metaData = data.frame(colnames(gmkf_lineage))
+metaData$short = substr(metaData[,1],11,16)
+metaData$MES_score = gsva_es_gmkf[as.character(metaData[,1]),1]
+metaData$ADRN_score = gsva_es_gmkf[as.character(metaData[,1]),2]
+rownames(metaData) = metaData$colnames.gmkf_lineage.
+metaData$colnames.gmkf_lineage. = NULL
+metaData$short = NULL
+metaData = metaData[colnames(gmkf_lineage),]
+metaData = metaData[order(metaData$ADRN_score),]
+metaData = metaData[order(metaData$MES_score),]
+
+gmkf_lineage = gmkf_lineage[,rownames(metaData)]
+
+colors = colorRampPalette(c("blue","white", "red"), space="rgb")(64)
+annocolor = list(groups= c(high = "purple", med="light yellow",low="orange"))
+
+aa = pheatmap(gmkf_lineage,cluster_rows=TRUE, show_colnames= F,show_rownames=F,cluster_cols=T,border_color = FALSE,annotation_col= metaData,color=colors)
+aa = pheatmap(gmkf_lineage,cluster_rows=TRUE, show_colnames= F,show_rownames=F,cluster_cols=T,border_color = FALSE,annotation_col= metaData,color=colors,annotation_colors = annocolor)
+aa
+
+pdf("GMKF_Stage4Amp_MESADRNGenes.pdf",width=10)
+aa
+dev.off()
+
+#overlap the gmkf protein and nbl protein results
+
+all_results$lnc_prot = paste(all_results$lnc,all_results$gene_name,sep="_")
+all_results_gmkf$lnc_prot = paste(all_results_gmkf$lnc,all_results_gmkf$gene_name,sep="_")
+
+all_results$lnc_pos = genes_anno[as.character(all_results$geneset),6]
+all_results$pcg_pos = genes_anno[as.character(all_results$gene),6]
+all_results$distance = all_results$pcg_pos-all_results$lnc_pos
+
+all_results_gmkf$lnc_pos = genes_anno[as.character(all_results_gmkf$geneset),6]
+all_results_gmkf$pcg_pos = genes_anno[as.character(all_results_gmkf$gene),6]
+all_results_gmkf$distance = all_results_gmkf$pcg_pos-all_results_gmkf$lnc_pos
+ggplot(all_results_gmkf,aes(log10(distance),spearman))+geom_point()
+
+temp = all_results[all_results$lnc_prot%in%all_results_gmkf$lnc_prot,]
+
+ggplot(all_results,aes(log10(distance),spearman))+xlim(c(-10000,10000))+geom_point()
+
+#plot the distance vs correlation of the lncs to the protein coding genes 
+
+
+#Gene set enrichment: 
+
+load("gmkf_gene_Stage4_NonAmp_GeneCorr_Results.rda") #protien correlation to MES/ADRN in GMKF
+
+#find lncRNAs with protein on same chr vicinity and high correlation to mes or adrn 
+results_all_protein_sig$type = "protein"
+results_all_protein_sig[results_all_protein_sig$gene%in%rownames(noncoding),]$type = "lncRNA"
+results_all_protein_sig$start_pos = genes_anno[as.character(results_all_protein_sig$gene),6]
+
+#also how many of the correlated genes are just mes/adrn genes?
+results_all_protein_sig = results_all_protein_sig[order(results_all_protein_sig$start_pos),]
+results_all_protein_sig$temp = gsub("chr","",results_all_protein_sig$chr)
+results_all_protein_sig = results_all_protein_sig[order(results_all_protein_sig$temp),]
+
+#label the gene as mes or adrn associated:
+
+results_all_protein_sig$cat = "mes"
+results_all_protein_sig[results_all_protein_sig$geneset=="adrn" & results_all_protein_sig[,3]>0,]$cat = "adrn"
+results_all_protein_sig[results_all_protein_sig$geneset=="mes" & results_all_protein_sig[,3]<0,]$cat = "adrn"
+
+gene_label = results_all_protein_sig[,colnames(results_all_protein_sig)%in%c("gene","gene_name","cat")]
+gene_label =gene_label[!duplicated(gene_label),]
+rownames(gene_label) = gene_label$gene
+gene_label = data.frame(gene_label)
+
+chr_names = names(table(as.character(results_all_protein_sig[abs(results_all_protein_sig[,3])>0.6 & results_all_protein_sig$type=="lncRNA",]$chr)))
+
+all_results = list()
+
+for (chr in chr_names){
+  print(chr)
+  gmkf_gene_lnc  = gmkf_gene[rownames(gmkf_gene)%in%results_all_protein_sig[results_all_protein_sig$chr==chr & results_all_protein_sig$type=="lncRNA" & abs(results_all_protein_sig[,3])>0.6,]$gene,]
+  gmkf_gene_lnc$samples = rownames(gmkf_gene_lnc)
+  temp = melt(gmkf_gene_lnc)
+  colnames(temp) = c("gene","samples","value")
+  gmkf_gene_prot  = gmkf_gene[rownames(gmkf_gene)%in%results_all_protein_sig[results_all_protein_sig$chr==chr & results_all_protein_sig$type=="protein",]$gene,]
+  gmkf_gene_prot$samples = rownames(gmkf_gene_prot)
+  temp2 = melt(gmkf_gene_prot)
+  colnames(temp2) = c("gene","samples","value")
+  gmkf_gene_sign_cor = merge(temp,temp2,by="samples")
+  colnames(gmkf_gene_sign_cor)= c("name","geneset","score","gene","value")
+  gmkf_gene_sign_cor$score= as.numeric(as.character(gmkf_gene_sign_cor$score))
+  results = gmkf_gene_sign_cor %>% group_by(geneset,gene) %>% summarize(cor.test(score,value,method="spearman")$estimate)
+pvalue = gmkf_gene_sign_cor %>% group_by(geneset,gene) %>% summarize(cor.test(score,value,method="spearman")$p.value)
+results$pvalue = pvalue$`cor.test(score, value, method = "spearman")$p.value`
+results$lnc = genes_anno[as.character(results$geneset),4]
+results$gene_name = genes_anno[as.character(results$gene),4]
+results$chr = genes_anno[as.character(results$gene),5]
+results = results[abs(results[,3])>0.4,]
+results$lnc_type = gene_label[as.character(results$geneset),3]
+results$pro_type = gene_label[as.character(results$gene),3]
+results = data.frame(results)
+colnames(results)[3] = "spearman"
+all_results[[chr]] = results
+print(chr)
+}
+
+all_results2 = all_results
+
+all_results = do.call("rbind", all_results)
+all_results = all_results[abs(all_results$spearman)>0.5,]
+all_results$known_mes = "no"
+all_results$known_adrn = "no"
+all_results[all_results$gene_name%in%adrn_genes$V1,]$known_adrn = "yes"
+all_results[all_results$gene_name%in%mes_genes$V1,]$known_mes = "yes"
+all_results$label = paste(all_results$lnc_type,all_results$pro_type,sep="_")
+
+all_results = all_results[all_results$geneset%in%results_gmkf_hc$gene,]
+
+#gene pairs with both mes/adrn were all shown to have negative correlation
+hist(all_results[all_results$label=="adrn_mes",]$spearman)
+hist(all_results[all_results$label=="mes_adrn",]$spearman)
+
+#now perform gene set enrichment on the correlated protein coding genes to get a sense of exactly what pathways the lncs may be involved? 
+
+#load the fisher exact test function first
+
+background = genes_anno[rownames(gmkf_gene),4]
+collection = msigDBsymbol$h.all.v5.0.symbols.gmt
+geneset = all_results[all_results$lnc_type=="mes" & all_results$pro_type=="mes",]$gene_name
+MSigDB_results_mes = multi_fet(geneset,collection,background)
+geneset = all_results[all_results$lnc_type=="adrn" & all_results$pro_type=="adrn",]$gene_name
+MSigDB_results_adrn = multi_fet(geneset,collection,background)
+
+collection=msigDBsymbol$c5.bp.v5.0.symbols.gmt
+collection=msigDBsymbol$c5.cc.v5.0.symbols.gmt
+collection=msigDBsymbol$c5.mf.v5.0.symbols.gmt
+
+geneset = all_results[all_results$lnc_type=="mes" & all_results$pro_type=="mes",]$gene_name
+MSigDB_results_mes = multi_fet(geneset,collection,background)
+geneset = all_results[all_results$lnc_type=="adrn" & all_results$pro_type=="adrn",]$gene_name
+MSigDB_results_adrn = multi_fet(geneset,collection,background)
+
+geneset = all_results2[all_results2$lnc_type=="mes" & all_results2$pro_type=="mes",]$gene_name
+MSigDB_results_mes = multi_fet(geneset,collection,background)
+geneset = all_results2[all_results2$lnc_type=="adrn" & all_results2$pro_type=="adrn",]$gene_name
+MSigDB_results_adrn = multi_fet(geneset,collection,background)
+
+MSigDB_results_mes$log = -log10(MSigDB_results_mes$FDR)
+MSigDB_results_mes$name = rownames(MSigDB_results_mes)
+MSigDB_results_mes = MSigDB_results_mes[order(MSigDB_results_mes$FDR,decreasing = T),]
+MSigDB_results_mes$name = factor(MSigDB_results_mes$name,levels=MSigDB_results_mes$name)
+
+yy = ggplot(MSigDB_results_mes[820:825,],aes(log,name))+geom_bar(stat = "identity")+xlab("")+ylab("")
+yy = yy+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+yy =yy+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))
+yy
+
+pdf("GMKF_Stage4Amp_MES_lnc_Pathway.pdf",width=15)
+yy
+dev.off()
+
+MSigDB_results_adrn$log = -log10(MSigDB_results_adrn$FDR)
+MSigDB_results_adrn$name = rownames(MSigDB_results_adrn)
+MSigDB_results_adrn = MSigDB_results_adrn[order(MSigDB_results_adrn$FDR,decreasing = T),]
+MSigDB_results_adrn$name = factor(MSigDB_results_adrn$name,levels=MSigDB_results_adrn$name)
+MSigDB_results_adrn$name = gsub("NUCLEOBASENUCLEOSIDENUCLEOTIDE_AND_NUCLEIC_ACID_METABOLIC_PROCESS","NUCLEIC_ACID_METABOLIC_PROCESS",MSigDB_results_adrn$name)
+MSigDB_results_adrn$name = factor(MSigDB_results_adrn$name,levels=MSigDB_results_adrn$name)
+
+yy = ggplot(MSigDB_results_adrn[820:825,],aes(log,name))+geom_bar(stat = "identity")+xlab("")+ylab("")
+yy = yy+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+yy =yy+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))
+yy
+
+pdf("GMKF_Stage4_AADRN_lnc_Pathway.pdf",width=15)
+yy
+dev.off()
+
+```
+
+#Supplementary Figure 6c 
+```{r}
+#compare the lncRNAs correlated with TARGET and GMKF NBL MES samples 
+
+load("NBL_Stage4_Amp_GeneCorr_Results.rda")
+
+load("GMKF_MES_ADRN_Score_Stage4Amp.rda")
+
+top_gmkf = results_gmkf
+top_target = results_nbl
+
+colnames(results_gmkf)[3] = "spear_cor"
+colnames(results_nbl)[3] = "spear_cor"
+
+results_nbl = results_nbl[!is.na(results_nbl$spear_cor),]
+results_gmkf = results_gmkf[!is.na(results_gmkf$spear_cor),]
+
+top_gmkf = results_gmkf[abs(results_gmkf[,3])>0.6,]
+top_target = results_nbl[abs(results_nbl[,3])>0.6,]
+
+#left join the two
+
+top_nbl = results_nbl %>% full_join(results_gmkf,by=c("geneset","gene_name")) %>% filter(!(is.na(gene.y))) %>% filter(!(is.na(gene.x))) %>% filter(gene_name %in% c(top_gmkf$gene_name,top_target$gene_name))
+top_nbl = top_nbl[top_nbl$gene.x%in%top_target$gene,]
+
+write.table(top_nbl,"Matched_TARGET_GMKF_Results_Stage4Amp.txt",quote=F,row.names=F,sep="\t")
+
+#only keep the lncs in results_nbl 
+top_nbl = top_nbl[top_nbl$gene.x%in%top_target$gene,]
+top_nbl$gmkf = abs(top_nbl$spear_cor.y)
+top_nbl$gmkf_sig = "no"
+
+top_nbl = top_nbl[top_nbl$gene.x%in%top_gmkf$gene,]
+top_nbl[top_nbl$gmkf>0.6,]$gmkf_sig = "yes"
+
+top_nbl = top_nbl[order(top_nbl$gmkf_sig,decreasing=T),]
+top_nbl$num = 1:length(top_nbl$gene.x)
+
+top_target[!(top_target$gene%in%top_nbl$gene.x),]
+
+q = ggplot(top_nbl,aes(spear_cor.x,spear_cor.y,color=geneset))+geom_point() + xlab("\nTARGET NBL (lncRNA to MES/ADRN score correlation)") + ylab("GMKF NBL (lncRNA to MES/ADRN score correlation)\n")+geom_text_repel(aes(spear_cor.x,spear_cor.y, label = gene_name,xlim = c(1, NA),data=subset(top_nbl, gmkf_sig=="yes")),color="dark green")
+q = q+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+q =q+theme(text = element_text(size=15,color="black"),axis.text = element_text(size=15,color="black"))+scale_color_brewer(palette="Set1",name = "Gene Types")
+q
+
+top_nbl$lazy = top_nbl$gene_name
+top_nbl[top_nbl$gmkf_sig=="yes",]$lazy = top_nbl[top_nbl$gmkf_sig=="yes",]$gene_name
+
+q = ggplot(top_nbl,aes(spear_cor.x,spear_cor.y,color=geneset,shape=gmkf_sig))+geom_point() + xlab("\nTARGET NBL (lncRNA to MES/ADRN score correlation)") + ylab("GMKF NBL (lncRNA to MES/ADRN score correlation)\n")+geom_text_repel(data = top_nbl[top_nbl$gmkf_sig=="yes",],aes(spear_cor.x,spear_cor.y,label=num))
+q = q+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+q =q+theme(text = element_text(size=15,color="black"),axis.text = element_text(size=15,color="black"))+scale_color_brewer(palette="Set1",name = "Gene Types")
+q
+
+pdf("GMKF_TARGET_ScoreCor_Comparison_Sig_Amp.pdf",width=15,height=15)
+q
+dev.off()
+
+
+
+```
+
+
+
+
+
+
+

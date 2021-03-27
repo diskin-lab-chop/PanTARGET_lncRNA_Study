@@ -1,0 +1,715 @@
+---
+title: "Figure 4 and Supplementary Figure 5 Generation"
+output: html_notebook
+---
+
+#Gene annotation and expression matrix data: 
+
+```{r}
+
+#loads the gene annotation files used in this study
+
+#genes_anno - all genes considered and their position, gene type, locus etc - Data associated with Supplementary Table 2
+#protein,non_coding - subset of genes_anno based on gene_type
+#all_genes_cancer,exp_cutoff_genes - gene annotation for genes that pass filtering threshold (at least 1 FPKM in 20% of samples)
+
+load("../Data/TARGET/PanCancer_lncRNA_AnnotationFiles_030121.rda")
+
+
+#loads the expression matrix (fpkm) for all samples used in this study 
+
+#fpkm - total expression matrix of all samples and alll genes 
+#fpkm_list - list of dataframes with each cancer gene exp matrix after filtering out low exp genes
+
+load("../Data/TARGET/PanCancer_lncRNA_ExpFiles_030121.rda")
+
+```
+
+#Load all the lncMod results. See the lncMod_Analysis folder to see README/scripts on how these files were generated. 
+
+```{r}
+
+# Load all the lncmod results - loads a data frame per cancer with correlation information per lncMod triplet. 
+
+load("~/Dropbox/ApexaFiles/PanTarget_Paper/Figure2_PanTarget_lncMod/Data/NBL_lncMod_Triplets_Combined_Permuted_0420.rda")
+
+nbl_lncmod = all.cor
+nbl_lncmod$combo = paste(nbl_lncmod$combo,nbl_lncmod$lncRNA,sep="+")
+nbl_lncmod$cancer = "NBL"
+nbl_lncmod$lncRNA_name = genes_anno[as.character(nbl_lncmod$lncRNA),4]
+nbl_lncmod$TF_name = genes_anno[as.character(nbl_lncmod$TF),4]
+nbl_lncmod$TG_name = genes_anno[as.character(nbl_lncmod$TargetGene),4]
+nbl_lncmod$lnc_TF = paste(nbl_lncmod$lncRNA_name,nbl_lncmod$TF_name,sep="_")
+nbl_lncmod$lnc_TG = paste(nbl_lncmod$lncRNA_name,nbl_lncmod$TG_name,sep="_")
+
+load("~/Dropbox/ApexaFiles/PanTarget_Paper/Figure2_PanTarget_lncMod/Data/AML_lncMod_Triplets_Combined_Permuted_0420.rda")
+aml_lncmod = all.cor
+aml_lncmod$combo = paste(aml_lncmod$combo,aml_lncmod$lncRNA,sep="+")
+aml_lncmod$cancer = "AML"
+aml_lncmod$lncRNA_name = genes_anno[aml_lncmod$lncRNA,4]
+aml_lncmod$lncRNA_name = genes_anno[as.character(aml_lncmod$lncRNA),4]
+aml_lncmod$TF_name = genes_anno[as.character(aml_lncmod$TF),4]
+aml_lncmod$TG_name = genes_anno[as.character(aml_lncmod$TargetGene),4]
+aml_lncmod$lnc_TF = paste(aml_lncmod$lncRNA_name,aml_lncmod$TF_name,sep="_")
+aml_lncmod$lnc_TG = paste(aml_lncmod$lncRNA_name,aml_lncmod$TG_name,sep="_")
+
+#aml_iqr = apply(AML,1,function(x) log2(IQR(x)))
+#aml_iqr[aml_iqr%in%aml_lncmod$TF]
+
+load("~/Dropbox/ApexaFiles/PanTarget_Paper/Figure2_PanTarget_lncMod/Data/TALL_lncMod_Triplets_Combined_Permuted_0420.rda")
+tall_lncmod = all.cor
+tall_lncmod$combo = paste(tall_lncmod$combo,tall_lncmod$lncRNA,sep="+")
+tall_lncmod$cancer = "TALL"
+tall_lncmod$lncRNA_name = genes_anno[tall_lncmod$lncRNA,4]
+tall_lncmod$lncRNA_name = genes_anno[as.character(tall_lncmod$lncRNA),4]
+tall_lncmod$TF_name = genes_anno[as.character(tall_lncmod$TF),4]
+tall_lncmod$TG_name = genes_anno[as.character(tall_lncmod$TargetGene),4]
+tall_lncmod$lnc_TF = paste(tall_lncmod$lncRNA_name,tall_lncmod$TF_name,sep="_")
+tall_lncmod$lnc_TG = paste(tall_lncmod$lncRNA_name,tall_lncmod$TG_name,sep="_")
+
+load("~/Dropbox/ApexaFiles/PanTarget_Paper/Figure2_PanTarget_lncMod/Data/BALL_lncMod_Triplets_Combined_Permuted_0420.rda")
+ball_lncmod = all.cor
+ball_lncmod$combo = paste(ball_lncmod$combo,ball_lncmod$lncRNA,sep="+")
+ball_lncmod$cancer = "BALL"
+ball_lncmod$lncRNA_name = genes_anno[ball_lncmod$lncRNA,4]
+ball_lncmod$lncRNA_name = genes_anno[as.character(ball_lncmod$lncRNA),4]
+ball_lncmod$TF_name = genes_anno[as.character(ball_lncmod$TF),4]
+ball_lncmod$TG_name = genes_anno[as.character(ball_lncmod$TargetGene),4]
+ball_lncmod$lnc_TF = paste(ball_lncmod$lncRNA_name,ball_lncmod$TF_name,sep="_")
+ball_lncmod$lnc_TG = paste(ball_lncmod$lncRNA_name,ball_lncmod$TG_name,sep="_")
+
+load("~/Dropbox/ApexaFiles/PanTarget_Paper/Figure2_PanTarget_lncMod/Data/WT_lncMod_Triplets_Combined_Permuted_0420.rda")
+wt_lncmod = all.cor
+wt_lncmod$combo = paste(wt_lncmod$combo,wt_lncmod$lncRNA,sep="+")
+wt_lncmod$cancer = "WT"
+wt_lncmod$lncRNA_name = genes_anno[wt_lncmod$lncRNA,4]
+wt_lncmod$lncRNA_name = genes_anno[as.character(wt_lncmod$lncRNA),4]
+wt_lncmod$TF_name = genes_anno[as.character(wt_lncmod$TF),4]
+wt_lncmod$TG_name = genes_anno[as.character(wt_lncmod$TargetGene),4]
+wt_lncmod$lnc_TF = paste(wt_lncmod$lncRNA_name,wt_lncmod$TF_name,sep="_")
+wt_lncmod$lnc_TG = paste(wt_lncmod$lncRNA_name,wt_lncmod$TG_name,sep="_")
+
+load("~/Dropbox/ApexaFiles/PanTarget_Paper/Figure2_PanTarget_lncMod/Data/RT_lncMod_Triplets_Combined_Permuted_0420.rda")
+rt_lncmod = all.cor
+rt_lncmod$combo = paste(rt_lncmod$combo,rt_lncmod$lncRNA,sep="+")
+rt_lncmod$cancer = "RT"
+rt_lncmod$lncRNA_name = genes_anno[rt_lncmod$lncRNA,4]
+rt_lncmod$lncRNA_name = genes_anno[as.character(rt_lncmod$lncRNA),4]
+rt_lncmod$TF_name = genes_anno[as.character(rt_lncmod$TF),4]
+rt_lncmod$TG_name = genes_anno[as.character(rt_lncmod$TargetGene),4]
+rt_lncmod$lnc_TF = paste(rt_lncmod$lncRNA_name,rt_lncmod$TF_name,sep="_")
+rt_lncmod$lnc_TG = paste(rt_lncmod$lncRNA_name,rt_lncmod$TG_name,sep="_")
+
+pantarget = list(AML,TALL,BALL,RT,WT,NBL)
+names(pantarget) = c("AML","TALL","BALL","RT","WT","NBL")
+pantarget_lncmod = rbind(aml_lncmod,tall_lncmod,ball_lncmod,nbl_lncmod,wt_lncmod,rt_lncmod)
+
+#annotate direction of change for each of the lncRNA modulators
+
+pantarget_lncmod$lncMod_type = "None"
+
+pantarget_lncmod[abs(pantarget_lncmod$Bottom_cor)<abs(pantarget_lncmod$Top_cor),]$lncMod_type = "Enhance"
+pantarget_lncmod[abs(pantarget_lncmod$Bottom_cor)>abs(pantarget_lncmod$Top_cor),]$lncMod_type = "Attenuate"
+
+pantarget_lncmod[(pantarget_lncmod$Top_cor>0.4 & pantarget_lncmod$Bottom_cor<(-0.4)) | (pantarget_lncmod$Top_cor<(-0.4) & pantarget_lncmod$Bottom_cor>0.4),]$lncMod_type = "Inverts"
+
+pantarget_lncmod$lnc_chr = genes_anno[as.character(pantarget_lncmod$lncRNA),5]
+pantarget_lncmod$TG_chr = genes_anno[as.character(pantarget_lncmod$TargetGene),5]
+
+#overview of lncRNA and target gene being on the same chromosome or not - add to a table
+
+#Supplementary Table 11:
+
+#save(pantarget_lncmod,file="PanTarget_lncMod_Results_0420.rda")
+
+```
+
+
+# Figure 4b - the types of lncRNA modulators that there are across cancers 
+
+```{r}
+#CHUNK4 - Plot per cancer the number of lncRNA modulators that either enhancer, attenuate, or invert TF-target gene correlation. The cutoffs were taken from the lncMap paper. 
+
+#show the lncModulator type as a ratio of total number of triplets per cancer 
+
+pantarget_lncmod_type = as.data.frame.matrix(table(pantarget_lncmod$cancer,pantarget_lncmod$lncMod_type))
+pantarget_lncmod_type$total = rowSums(pantarget_lncmod_type)
+pantarget_lncmod_type$Attenuate = pantarget_lncmod_type$Attenuate/pantarget_lncmod_type$total
+pantarget_lncmod_type$Enhance = pantarget_lncmod_type$Enhance/pantarget_lncmod_type$total
+pantarget_lncmod_type$Inverts = pantarget_lncmod_type$Inverts/pantarget_lncmod_type$total
+pantarget_lncmod_type$total = NULL
+pantarget_lncmod_type$cancer = rownames(pantarget_lncmod_type)
+pantarget_lncmod_type = melt(pantarget_lncmod_type)
+  
+pantarget_lncmod_type$cancer = factor(pantarget_lncmod_type$cancer,levels=c("AML","BALL","TALL","NBL","WT","RT"))
+
+
+yy = ggplot(pantarget_lncmod_type,aes(cancer,value,fill=variable))+geom_bar(stat="identity") + xlab("") + ylab("Proportion of lncRNA Triplets\n")+scale_fill_discrete(name = "lncRNA Modulator Type")
+yy = yy+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+yy =yy+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))+scale_y_continuous(expand = c(0, 0))
+yy
+
+pdf("lncModulator_Type.pdf",width =10)
+yy
+dev.off()
+
+```
+
+# Figure 4c - lncRNA modulators and their tau scores 
+
+```{r}
+
+#Plot the tau score for shared modulators to see if being more ubiquitiously expressed correlates with functioning in more cancers as a modulator 
+
+library(EnvStats)
+
+tau_score = read.table("PanTARGET_AllGenes_TissueSpecificScore_040120.txt")
+tau_score = tau_score[rownames(tau_score)%in%rownames(genes_anno),]
+tau_score = tau_score[rownames(tau_score)%in%exp_cutoff_genes$V1,]
+tau_score$gene_name = genes_anno[rownames(tau_score),4]
+tau_score$gene_type = genes_anno[rownames(tau_score),3]
+tau_score$gene_type_simple =as.character(tau_score$gene_type)
+tau_score[grep("protein",tau_score$gene_type),5] = "protein"
+tau_score[grep("lncRNA",tau_score$gene_type),5] = "lncRNA"
+tau_score[grep("MSTRG_Non_coding_lncRNA",tau_score$gene_type),5] = "novel_lncRNA"
+tau_score[grep("lnc-",tau_score$gene_name),5] = "novel_lncRNA"
+tau_score = tau_score[grep("protein|lncRNA|novel_lncRNA",tau_score$gene_type_simple),]
+tau_score$combo = paste(rownames(tau_score),tau_score$Tissue_name,sep="+")
+
+pantarget_lncmod_lncRNAs = data.frame(table(as.character(pantarget_lncmod$lncRNA),as.character(pantarget_lncmod$cancer)))
+pantarget_lncmod_lncRNAs = pantarget_lncmod_lncRNAs[pantarget_lncmod_lncRNAs$Freq!=0,]
+#at this point there is information about how many cancer types per lncRNA are represented
+pantarget_lncmod_lncRNAs = data.frame(table(as.character(pantarget_lncmod_lncRNAs$Var1)))
+pantarget_lncmod_lncRNAs$tau_score = tau_score[as.character(pantarget_lncmod_lncRNAs$Var1),1]
+#pancancer_lncmodulators = pantarget_lncmod_lncRNAs[pantarget_lncmod_lncRNAs$Freq>=4,1]
+pantarget_lncmod_lncRNAs$Freq = factor(pantarget_lncmod_lncRNAs$Freq,c(1,2,3,4,5,6))
+
+
+#combine the pan-cancer lncRNAs
+
+#boxplot
+zz =ggplot(pantarget_lncmod_lncRNAs,aes(pantarget_lncmod_lncRNAs$Freq,pantarget_lncmod_lncRNAs$tau_score))+geom_boxplot()+scale_fill_discrete(name="n")+xlab("\nNumber of Cancers with Shared lncRNA Modulator") + ylab("lncRNA Modulator Tau Score\n")+stat_n_text(size=5)
+zz = zz+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+zz =zz+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))
+zz
+
+pdf("lncMod_TissueScore_SharedCancers_0420.pdf",width=8)
+plot(zz)
+dev.off()
+
+```
+
+# Figure 4d - lncRNA modulator target gene - gene set enrichment results and Supplementary Table 11
+
+#MSIGDB Here
+
+```{r}
+
+#CHUNK9- Pathway analysis for lncMod target genes to assign pathway via guilt-by-association to lncRNA
+
+#Msigdb analysis: - load the gene sets - you can download this from MSigDB
+load("MSigDB_v5.0_human.rda")
+
+
+#Functions created by Gonalazo to perform gene set enrichment using Fisher's Exact Test: 
+fet=function(a,b,tot=NULL,alternative='t'){
+## a =vector a
+## b = vector b
+## tot = background list
+## alternative 't' = two-sided; 'g'=greater; 'l'=less
+if(is.null(tot)) {
+tot <- unique(c(a,b))
+warning("No background list provided; a+b-(ab) used as background")
+}
+common <- length(intersect(intersect(a,b),tot))
+#print(common)
+na <- length(intersect(setdiff(a,intersect(a,b)),tot))
+nb <- length(intersect(setdiff(b,intersect(a,b)),tot))
+rest<- length(tot) - na - nb - common
+#print(common)
+#print(na)
+#print(nb)
+#print(rest)
+res <- fisher.test(matrix(c(common,na,nb,rest),2,2),alternative=alternative)
+return(list(p.value=res$p.value,oddsr=res$estimate,call=matrix(c(common,na,nb,rest),2,2)))
+}
+
+multi_fet <- function(set, collection, tot=NULL){
+count =0
+#set a vector containing gene names
+#collection a list containing multiple pathway related gene sets
+#background gene list (by default combines genes n the collection)
+if(is.null(tot)) tot <- unique(unlist(collection))
+res<-list()
+for(i in names(collection)){
+f <- fet(set,collection[[i]],tot)
+#print(f)
+res[[i]] <- c(f$p.value,f$oddsr, as.numeric(f$call))
+}
+ret <- data.frame(do.call(rbind,res))
+fdr <- p.adjust(ret[,1],method="fdr")
+ret <- cbind(fdr,ret)
+colnames(ret) <- c("FDR","fet","OddsR","AB","BB","AA","tot")
+return(ret[order(ret[,2]),])
+}
+
+#remove novel genes from triplet data
+
+pantarget_lncmod = pantarget_lncmod[grep("MSTRG|lnc-",pantarget_lncmod$TF,invert=T),]
+pantarget_lncmod = pantarget_lncmod[grep("MSTRG|lnc-",pantarget_lncmod$TargetGene,invert=T),]
+#pantarget_lncmod = pantarget_lncmod[grep("MSTRG|lnc-",pantarget_lncmod$lncRNA,invert=T),]
+
+#run the gene set enrichment per cancer individually:
+
+lncmod_gsea = data.frame()
+
+for (cancers in c("AML","TALL","BALL","RT","WT","NBL")){
+  geneset = names(table(as.character(pantarget_lncmod[pantarget_lncmod$cancer==cancers,]$TargetGene)))
+  geneset = genes_anno[geneset,4]
+  geneset = geneset[grep("MSTRG|lnc-",geneset,invert=T)]
+  background = genes_anno[rownames(pantarget[[cancers]]),4]
+  background = background[grep("MSTRG|lnc-",background,invert=T)]
+  #background = background[background%in%genes_anno[rownames(protein),4]]
+  #KEGG or GO biological process
+  #msigDBsymbol$c5.bp.v5.0.symbols.gmt
+  #msigDBsymbol$c2.cp.kegg.v5.0.symbols.gmt
+  #msigDBsymbol$h.all.v5.0.symbols.gmt
+  collection=msigDBsymbol$h.all.v5.0.symbols.gmt
+  #collection = msigDBsymbol$c5.bp.v5.0.symbols.gmt
+  #collection = msigDBsymbol$c2.cp.kegg.v5.0.symbols.gmt
+  #collection=NULL
+  MSigDB_results = multi_fet(geneset,collection,background)
+  MSigDB_results$cancer = cancers
+  MSigDB_results$set = rownames(MSigDB_results)
+  lncmod_gsea = rbind(lncmod_gsea,MSigDB_results)
+}
+
+MSigDB_results_sig = MSigDB_results[MSigDB_results$FDR<0.1,]
+MSigDB_results_sig = MSigDB_results_sig[order(MSigDB_results_sig$fet,decreasing = T),]
+MSigDB_results_sig$pathway = rownames(MSigDB_results_sig)
+MSigDB_results_sig$pathway = factor(MSigDB_results_sig$pathway,levels=c(MSigDB_results_sig$pathway))
+
+lncmod_gsea_sig = lncmod_gsea[lncmod_gsea$FDR<0.1,]
+lncmod_gsea_sig$FDR2 = -log10(lncmod_gsea_sig$FDR)
+
+lncmod_gsea$FDR2= -log10(lncmod_gsea$FDR)
+
+#take the results for gene set enrichment above and make it into a table with columns as cancer and each row as a gene set 
+
+lncmod_gsea_sig_plot = dcast(lncmod_gsea_sig,formula=set~cancer,value.var="FDR2")
+#0720
+lncmod_gsea_sig_plot = dcast(lncmod_gsea,formula=set~cancer,value.var="FDR2")
+lncmod_gsea_sig_plot[is.na(lncmod_gsea_sig_plot)] = 0
+rownames(lncmod_gsea_sig_plot) = lncmod_gsea_sig_plot$set
+lncmod_gsea_sig_plot$set = NULL
+
+#overall categories for the MsigDB gene sets 
+
+hallcat = read.delim("MsigDB_Hallmark_Categories.txt",header=F)
+
+rownames(hallcat) = hallcat$V1
+hallcat = hallcat[order(hallcat$V2),]
+hallcat = hallcat[!is.na(hallcat$V2),]
+hallcat = hallcat[hallcat$V1%in%rownames(lncmod_gsea_sig_plot),]
+
+MSigDB_results_sig$category = hallcat[rownames(MSigDB_results_sig),2]
+lncmod_gsea_sig$category= hallcat[as.character(lncmod_gsea_sig$set),2]
+
+lncmod_gsea_sig_plot = lncmod_gsea_sig_plot[as.character(hallcat$V1),]
+lncmod_gsea_sig_plot = lncmod_gsea_sig_plot[,c("AML","BALL","TALL","RT","WT","NBL")]
+
+rownames(lncmod_gsea_sig_plot) = gsub("HALLMARK_","",rownames(lncmod_gsea_sig_plot))
+
+#rownames(lncmod_gsea_sig_plot) = tolower(rownames(lncmod_gsea_sig_plot))
+#rownames(lncmod_gsea_sig_plot) = gsub("kegg_","",rownames(lncmod_gsea_sig_plot))
+
+colors = colorRampPalette(c("white","orange","red"), space="rgb")(64)
+
+yy =pheatmap(lncmod_gsea_sig_plot,show_rownames = T,show_colnames = T,cluster_cols = F,cluster_rows = F,color=colors,angle_col =0)
+yy
+
+pdf("GeneSet_Enrich_Heatmap_lncMod_TG_0720.pdf",width=5.5)
+yy
+dev.off()
+
+
+#Supplementary Table 11 - with the pathway results 
+
+#write.table(lncmod_gsea,"lncMod_MsigDB_Hallmark_results.txt",quote=F,row.names = F,col.names=F,sep="\t")
+
+```
+
+#Figure 4e-f - the top TFs for BLACE and the lncMod triplet heatmap for BLACE and XBP1
+
+```{r}
+library(ggplot2)
+library(pheatmap)
+
+path = read.delim("../Results/All_lncMod_Results_Anno.txt",header=T)
+
+#BALL: BLACE-XBP1
+
+plot_lncTF = data.frame(sort(table(path[path$lncRNA=="ENSG00000204960.5" & path$cancer=="BALL",]$TF_name),decreasing = T))
+plot_lncTF = plot_lncTF[1:10,]
+
+xx = ggplot(plot_lncTF,aes(Var1,Freq))+geom_bar(stat="identity")+ylab("# of Target Genes\n") + xlab("\nTranscription Factors")+ggtitle("B-ALL: BLACE")
+xx = xx+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+xx =xx+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"),axis.text.x = element_text(angle = 90, hjust = 1))
+xx
+
+pdf("BALL_BLACE_TFs.pdf")
+xx
+dev.off()
+
+#heatmap for target genes for a specific lncRNA-TF.
+
+cancer = BALL
+
+temp = cancer[rownames(cancer)%in%as.character(pantarget_lncmod[pantarget_lncmod$lnc_TF=="BLACE_XBP1",]$TargetGene),]
+temp = rbind(cancer["ENSG00000100219.12",],temp)
+temp = rbind(cancer["ENSG00000204960.5",],temp)
+name = genes_anno[rownames(temp),4]
+temp = temp[,order(temp[1,])]
+
+bottom = floor(length(cancer)*0.25)
+top = (length(cancer)-floor(length(cancer)*0.25))+1
+temp= temp[,c(1:bottom,top:length(cancer))]
+
+temp[,1:bottom] = temp[,colnames(sort(temp[2,1:bottom]))]
+temp[,(bottom+1):length(temp)] = temp[,colnames(sort(temp[2,(bottom+1):length(temp)]))]
+
+triplet =temp
+
+triplet = data.frame(t(scale(t(log2(triplet+1)),center=T,scale=T)))
+
+
+temp_path = path[grep("BLACE_XBP1",path$triplet),]
+rownames(temp_path) = temp_path$TargetGene
+
+path$lnc_TF = paste(path$lncRNA_name,path$TF_name,sep="_")
+
+row_anno = path[path$TargetGene%in%rownames(triplet[-2,]) & path$lnc_TF=="BLACE_XBP1",]$pathcat
+
+row_anno = data.frame(c("","",as.character(row_anno)))
+
+rownames(triplet)= name
+
+rownames(row_anno)= name
+colnames(row_anno) = "PathCat"
+row_anno$extra = row_anno[,1]
+row_anno = row_anno[order(row_anno$PathCat),]
+
+triplet = triplet[rownames(row_anno),]
+
+#triplet = triplet[c(2,3,1),]
+
+colors = colorRampPalette(c("blue","white", "red"), space="rgb")(64)
+
+aa=pheatmap(triplet,cluster_rows=F, show_colnames=F,show_rownames=T,cluster_cols=F, color=colors,fontsize = 16,gaps_col = 47,gaps_row = c(1,2),border_color = NA,annotation_row = row_anno)
+
+pdf("BALL_BLACE_XBP1_Genes_Heatmap.pdf",height=9,width=15)
+aa
+dev.off()
+
+```
+
+
+# Supplementary Figure 5a - example of lncMod triplet 
+
+```{r}
+#WT: RMST-SOX2
+
+cancer = WT
+
+temp = cancer[rownames(cancer)%in%as.character(pantarget_lncmod[pantarget_lncmod$lnc_TF=="RMST_SOX2",]$TargetGene),]
+temp = rbind(cancer["ENSG00000181449.2",],temp)
+temp = rbind(cancer["ENSG00000255794.2",],temp)
+name = genes_anno[rownames(temp),4]
+temp = temp[,order(temp[1,])]
+
+bottom = floor(length(cancer)*0.25)
+top = (length(cancer)-floor(length(cancer)*0.25))+1
+temp= temp[,c(1:bottom,top:length(cancer))]
+
+temp[,1:bottom] = temp[,colnames(sort(temp[2,1:bottom]))]
+temp[,(bottom+1):length(temp)] = temp[,colnames(sort(temp[2,(bottom+1):length(temp)]))]
+
+triplet =temp
+
+triplet = data.frame(t(scale(t(log2(triplet+1)),center=T,scale=T)))
+
+
+rownames(triplet)= name
+
+#triplet = triplet[c(2,3,1),]
+
+colors = colorRampPalette(c("blue","white", "red"), space="rgb")(64)
+
+aa=pheatmap(triplet,cluster_rows=F, show_colnames=F,show_rownames=T,cluster_cols=F, color=colors,fontsize = 16,gaps_col = bottom,gaps_row = c(1,2),border_color = NA)
+
+pdf("WT_RMST_SOX2_Genes_Heatmap.pdf",height=9,width=15)
+aa
+dev.off()
+
+```
+
+#Supplementary Figure 5b - how many effects can a lncRNA modular have on target genes 
+
+```{r}
+#the lncMod type per lncRNA - We determine per unique lncRNA how many types of functions can it hvae depending on the triplet in question.
+
+pantarget_lncmod$lnc_type_name = paste(pantarget_lncmod$lncRNA_name,pantarget_lncmod$lncMod_type,sep="+")
+
+pantarget_lnctargets = data.frame(table(pantarget_lncmod$lnc_type_name,pantarget_lncmod$cancer))
+pantarget_lnctargets = pantarget_lnctargets[pantarget_lnctargets$Freq!=0,]
+
+pantarget_lnctargets = separate(data=pantarget_lnctargets,col="Var1",into=c("lncRNA","Type"),sep="\\+")
+
+pantarget_lnctargets = data.frame(table(pantarget_lnctargets$lncRNA,pantarget_lnctargets$Var2))
+pantarget_lnctargets = pantarget_lnctargets[pantarget_lnctargets$Freq!=0,]
+
+#number of lncRNAs per type per cancer 
+pantarget_lnctargets = data.frame(table(pantarget_lnctargets$Var2,pantarget_lnctargets$Freq))
+table(pantarget_lnctargets$Freq)
+
+pantarget_lnctargets$Var1 = factor(pantarget_lnctargets$Var1,levels=c("NBL","WT","BALL","TALL","AML","RT"))
+
+yy = ggplot(pantarget_lnctargets,aes(pantarget_lnctargets$Var1,pantarget_lnctargets$Freq,fill=pantarget_lnctargets$Var2))+geom_bar(stat="identity")+xlab("")+ylab("Number of lncRNAs\n")+scale_fill_discrete(name = "Number of Modulator Types")
+yy = yy+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+yy =yy+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"))+scale_y_continuous(expand = c(0, 0))
+yy
+
+pdf("lncModulator_Type_PerLncRNA.pdf",width =10)
+yy
+dev.off()
+
+```
+
+#Supplementary Figure 5c - NBL H19 lncRNA modulatory gene set enrichment
+
+```{r}
+#NBL - H19
+
+#Gene set enrichment for one lncRNA and its TF's target genes, i.e. for any one lncRNA in one cancer what are the pathways it appears to be enriched in based on its target genes. 
+
+geneset = names(table(as.character(pantarget_lncmod[pantarget_lncmod$cancer=="NBL" & pantarget_lncmod$lncRNA_name=="H19",]$TargetGene)))
+geneset = genes_anno[geneset,4]
+geneset = geneset[grep("MSTRG|lnc-",geneset,invert=T)]
+
+background = genes_anno[rownames(NBL),4]
+background = background[grep("MSTRG|lnc-",background,invert=T)]
+
+collection=msigDBsymbol$h.all.v5.0.symbols.gmt
+
+#you will need to load this function from above: 
+
+MSigDB_results = multi_fet(geneset,collection,background)
+MSigDB_results$cancer = "NBL"
+MSigDB_results$set = rownames(MSigDB_results)
+MSigDB_results = MSigDB_results[1:5,]
+
+MSigDB_results_sig = MSigDB_results[MSigDB_results$fet<0.05,]
+MSigDB_results_sig = MSigDB_results_sig[order(MSigDB_results_sig$AB,decreasing = F),]
+MSigDB_results_sig$pathway = rownames(MSigDB_results_sig)
+MSigDB_results_sig$pathway = paste(MSigDB_results_sig$pathway,hallcat[as.character(MSigDB_results_sig$pathway),2],sep="_")
+MSigDB_results_sig$pathway = gsub("HALLMARK_","",MSigDB_results_sig$pathway)
+MSigDB_results_sig$pathway = factor(MSigDB_results_sig$pathway,levels=c(MSigDB_results_sig$pathway))
+
+
+xx = ggplot(MSigDB_results_sig,aes(MSigDB_results_sig$pathway,MSigDB_results_sig$AB))+geom_bar(stat="identity",width=0.5)+coord_flip()+ylab("# of Target Genes\n") + xlab("\nHallmarks")+ggtitle("NBL: H19")
+xx = xx+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+xx =xx+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"),axis.text.x = element_text(angle = 0, vjust = 1))
+xx
+pdf("Hallmark_Pathways_NBL_H19_Enrichment.pdf",width=15)
+xx
+dev.off()
+
+```
+
+#Supplementary Figure 5d - NBL H19 lncRNA modulatory gene set enrichment
+
+```{r}
+#AML - HOTAIRM1
+
+#Gene set enrichment for one lncRNA and its TF's target genes, i.e. for any one lncRNA in one cancer what are the pathways it appears to be enriched in based on its target genes. 
+
+geneset = names(table(as.character(pantarget_lncmod[pantarget_lncmod$cancer=="AML" & pantarget_lncmod$lncRNA_name=="HOTAIRM1",]$TargetGene)))
+geneset = genes_anno[geneset,4]
+geneset = geneset[grep("MSTRG|lnc-",geneset,invert=T)]
+
+background = genes_anno[rownames(AML),4]
+background = background[grep("MSTRG|lnc-",background,invert=T)]
+
+MSigDB_results = multi_fet(geneset,collection,background)
+MSigDB_results$cancer = "AML"
+MSigDB_results$set = rownames(MSigDB_results)
+
+#you will need to load this function from above: 
+
+MSigDB_results_sig = MSigDB_results[MSigDB_results$fet<0.05,]
+MSigDB_results_sig = MSigDB_results_sig[order(MSigDB_results_sig$AB,decreasing = F),]
+MSigDB_results_sig$pathway = rownames(MSigDB_results_sig)
+MSigDB_results_sig$pathway = paste(MSigDB_results_sig$pathway,hallcat[as.character(MSigDB_results_sig$pathway),2],sep="_")
+MSigDB_results_sig$pathway = gsub("HALLMARK_","",MSigDB_results_sig$pathway)
+MSigDB_results_sig$pathway = factor(MSigDB_results_sig$pathway,levels=c(MSigDB_results_sig$pathway))
+
+xx = ggplot(MSigDB_results_sig,aes(MSigDB_results_sig$pathway,MSigDB_results_sig$AB))+geom_bar(stat="identity",width=0.5)+coord_flip()+ylab("# of Target Genes\n") + xlab("\nHallmarks")+ggtitle("AML: HOTAIRM1")
+xx = xx+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+xx =xx+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"),axis.text.x = element_text(angle = 0, vjust = 1))
+xx
+
+pdf("Hallmark_Pathways_AML_HOTAIRM1_Enrichment.pdf",width=10)
+xx
+dev.off()
+
+```
+
+#Supplementary Figure 5e - Heatmap and TF bar graph - GAS5+E2F4
+
+```{r}
+#T-ALL: GAS5
+
+path = read.delim("All_lncMod_Results_Anno.txt",header=T)
+
+plot_lncTF = data.frame(sort(table(path[path$lncRNA=="ENSG00000234741.3" & path$cancer=="TALL",]$TF_name),decreasing = T))
+plot_lncTF = plot_lncTF[1:10,]
+
+xx = ggplot(plot_lncTF,aes(Var1,Freq))+geom_bar(stat="identity")+ylab("# of Target Genes\n") + xlab("\nTranscription Factors")+ggtitle("T-ALL: SNHG1")
+xx = xx+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+xx =xx+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"),axis.text.x = element_text(angle = 90, hjust = 1))
+xx
+
+pdf("TALL_GAS5_TFs.pdf")
+xx
+dev.off()
+
+#heatmap for proliferation genes for a specific lncRNA-TF. Need to have run chunk9/10.
+
+cancer = TALL
+
+temp = pantarget_lncmod[pantarget_lncmod$cancer=="TALL" & pantarget_lncmod$lnc_TF=="GAS5_E2F4",]
+temp = temp[order(temp$Bottom_cor),]
+temp = cancer[as.character(temp$TargetGene),]
+
+temp = rbind(cancer["ENSG00000205250.4",],temp)
+temp = rbind(cancer["ENSG00000234741.3",],temp)
+name = genes_anno[rownames(temp),4]
+temp = temp[,order(temp[1,])]
+
+bottom = floor(length(cancer)*0.25)
+top = (length(cancer)-floor(length(cancer)*0.25))+1
+temp= temp[,c(1:bottom,top:length(cancer))]
+
+temp[,1:bottom] = temp[,colnames(sort(temp[2,1:bottom]))]
+temp[,(bottom+1):length(temp)] = temp[,colnames(sort(temp[2,(bottom+1):length(temp)]))]
+
+triplet =temp
+
+triplet = data.frame(t(scale(t(log2(triplet+1)),center=T,scale=T)))
+
+rownames(triplet)= name
+
+#triplet = triplet[c(2,3,1),]
+
+colors = colorRampPalette(c("blue","white", "red"), space="rgb")(64)
+
+aa=pheatmap(triplet,cluster_rows=F, show_colnames=F,show_rownames=T,cluster_cols=F, color=colors,fontsize = 16,gaps_col = bottom,gaps_row=c(1,2),border_color = NA)
+aa
+
+pdf("TALL_GAS5_E2F4_Genes_Heatmap.pdf",height=9,width=15)
+aa
+dev.off()
+
+```
+
+#Supplementary Figure 5e - Heatmap and TF bar graph - SNHG1+TP53
+
+```{r}
+#T-ALL: SNHG1_TP53
+
+plot_lncTF = data.frame(sort(table(path[path$lncRNA=="ENSG00000255717.2" & path$cancer=="TALL",]$TF_name),decreasing = T))
+plot_lncTF = plot_lncTF[1:10,]
+
+xx = ggplot(plot_lncTF,aes(Var1,Freq))+geom_bar(stat="identity")+ylab("# of Target Genes\n") + xlab("\nTranscription Factors")+ggtitle("T-ALL: SNHG1")
+xx = xx+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+xx =xx+theme(text = element_text(size=20,color="black"),axis.text = element_text(size=20,color="black"),axis.text.x = element_text(angle = 90, hjust = 1))
+xx
+
+pdf("TALL_SNHG1_TFs.pdf")
+xx
+dev.off()
+
+
+#heatmap for proliferation genes for a specific lncRNA-TF. Need to have run chunk9/10.
+
+cancer = TALL
+
+temp = pantarget_lncmod[pantarget_lncmod$cancer=="TALL" & pantarget_lncmod$lnc_TF=="SNHG1_TP53",]
+temp = temp[order(temp$Bottom_cor),]
+temp = cancer[as.character(temp$TargetGene),]
+
+temp = rbind(cancer["ENSG00000141510.11",],temp)
+temp = rbind(cancer["ENSG00000255717.2",],temp)
+name = genes_anno[rownames(temp),4]
+temp = temp[,order(temp[1,])]
+
+bottom = floor(length(cancer)*0.25)
+top = (length(cancer)-floor(length(cancer)*0.25))+1
+temp= temp[,c(1:bottom,top:length(cancer))]
+
+temp[,1:bottom] = temp[,colnames(sort(temp[2,1:bottom]))]
+temp[,(bottom+1):length(temp)] = temp[,colnames(sort(temp[2,(bottom+1):length(temp)]))]
+
+triplet =temp
+
+triplet = data.frame(t(scale(t(log2(triplet+1)),center=T,scale=T)))
+
+rownames(triplet)= name
+
+#triplet = triplet[c(2,3,1),]
+
+colors = colorRampPalette(c("blue","white", "red"), space="rgb")(64)
+
+aa=pheatmap(triplet,cluster_rows=F, show_colnames=F,show_rownames=T,cluster_cols=F, color=colors,fontsize = 16,gaps_col = bottom,gaps_row=c(1,2),border_color = NA)
+aa
+
+pdf("TALL_SNHG1_TP53_Genes_Heatmap.pdf",height=9,width=15)
+aa
+dev.off()
+
+```
+
+#Supplementary Table 12
+
+```{r}
+
+library(dplyr)
+library(reshape2)
+#create table of lnc-TF associations for supplementary table
+
+load("PanTarget_lncMod_Results_0420.rda")
+
+pantarget_lncmod$lnc_TF = gsub("\\+","_",pantarget_lncmod$lnc_TF)
+pantarget_lncmod$lnc_TG = gsub("\\+","_",pantarget_lncmod$lnc_TG)
+
+lncTF = data.frame(table(pantarget_lncmod$cancer,pantarget_lncmod$lncRNA_name,pantarget_lncmod$TF_name))
+lncTF = lncTF[lncTF$Freq!=0,]
+
+lncTF = lncTF[order(lncTF$Freq,decreasing=T),]
+lncTF = lncTF %>% group_by(Var1,Var2) %>% mutate(rank=row_number())
+lncTF$cancer_lnc = paste(lncTF$Var1,lncTF$Var2,sep=": ")
+lncTF$TF_Freq = paste(lncTF$Var3,lncTF$Freq,sep=": ")
+lncTF = dcast(lncTF,cancer_lnc~rank,value.var = "TF_Freq")
+lncTF = lncTF[,c(1:11)]
+
+write.table(lncTF,"Supp_Table12_lncTF_lncMod.txt",quote=F,row.names=F,sep="\t")
+
+```
